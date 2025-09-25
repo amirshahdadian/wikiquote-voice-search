@@ -1,0 +1,3 @@
+# Ignore generated data artifacts
+recordings/*.wav
+*.db
