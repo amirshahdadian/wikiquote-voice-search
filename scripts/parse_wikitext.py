@@ -4,9 +4,15 @@ import json
 import re
 import logging
 import hashlib
+import sys
+from pathlib import Path
 from typing import List, Dict, Optional, Set
 from collections import defaultdict
-from wikiquote_voice import Config
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.wikiquote_voice import Config
 
 # Set up logging
 logging.basicConfig(level=getattr(logging, Config.LOG_LEVEL), 
@@ -406,12 +412,32 @@ class MWParserQuoteExtractor:
         return any(excluded in section_lower for excluded in self.exclude_sections)
     
     def _is_valid_quote(self, text: str) -> bool:
-        """Validate if extracted text is actually a quote."""
+        """Validate if extracted text is actually a quote - STRICTER validation."""
         if not text:
             return False
         
-        # Length checks
-        if len(text) < 10 or len(text) > 1000:
+        # STRICT length checks - Only actual quotes (not paragraphs)
+        if len(text) < 10 or len(text) > 250:
+            return False
+        
+        # Word count check - quotes are concise
+        word_count = len(text.split())
+        if word_count < 3 or word_count > 40:
+            return False
+        
+        # Sentence count check - Max 2 sentences for quotes
+        sentence_count = text.count('.') + text.count('!') + text.count('?')
+        if sentence_count > 2:
+            return False
+        
+        # Exclude narrative text indicators
+        narrative_indicators = [
+            'referring to', 'talking about', 'in his', 'in her',
+            'he said', 'she said', 'when asked', 'during an interview',
+            'in the', 'at the', 'on the', 'with the'
+        ]
+        text_lower = text.lower()
+        if any(indicator in text_lower for indicator in narrative_indicators):
             return False
         
         # Exclude certain patterns
@@ -423,11 +449,6 @@ class MWParserQuoteExtractor:
         for pattern in exclude_patterns:
             if re.match(pattern, text, re.IGNORECASE):
                 return False
-        
-        # Check for minimum word count
-        word_count = len(text.split())
-        if word_count < 3:
-            return False
         
         # Exclude if it's mostly punctuation or numbers
         alpha_chars = sum(1 for c in text if c.isalpha())

@@ -3,7 +3,10 @@ import logging
 from typing import List, Dict
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
+import sys
+import os
 from wikiquote_voice import Config
+
 
 # Set up logging
 logging.basicConfig(level=getattr(logging, Config.LOG_LEVEL), 

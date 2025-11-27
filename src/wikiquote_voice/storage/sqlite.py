@@ -119,6 +119,17 @@ def initialize_database(db_path: Optional[Path] = None) -> Path:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
             );
         """,
+        "user_tts_preferences": """
+            CREATE TABLE IF NOT EXISTS user_tts_preferences (
+                user_id TEXT PRIMARY KEY,
+                pitch_scale REAL DEFAULT 1.0,
+                speaking_rate REAL DEFAULT 1.0,
+                energy_scale REAL DEFAULT 1.0,
+                style TEXT DEFAULT 'neutral',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """,
     }
 
     with sqlite3.connect(database_path) as connection:
@@ -138,4 +149,181 @@ def _iter_table_statements(statements: Dict[str, str]) -> Iterable[str]:
         yield normalized
 
 
-__all__ = ["DEFAULT_DB_PATH", "get_connection", "initialize_database"]
+# TTS Preferences Helper Functions
+def save_tts_preferences(user_id: str, preferences: Dict, db_path: Optional[Path] = None) -> bool:
+    """
+    Save or update TTS preferences for a user
+    
+    Args:
+        user_id: User identifier
+        preferences: Dictionary with pitch_scale, speaking_rate, energy_scale, style
+        db_path: Optional database path
+        
+    Returns:
+        True if successful
+    """
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO user_tts_preferences 
+            (user_id, pitch_scale, speaking_rate, energy_scale, style, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(user_id) DO UPDATE SET
+                pitch_scale = excluded.pitch_scale,
+                speaking_rate = excluded.speaking_rate,
+                energy_scale = excluded.energy_scale,
+                style = excluded.style,
+                updated_at = datetime('now')
+        """, (
+            user_id,
+            preferences.get('pitch_scale', 1.0),
+            preferences.get('speaking_rate', 1.0),
+            preferences.get('energy_scale', 1.0),
+            preferences.get('style', 'neutral')
+        ))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"Error saving TTS preferences: {e}")
+        return False
+
+
+def get_tts_preferences(user_id: str, db_path: Optional[Path] = None) -> Optional[Dict]:
+    """
+    Get TTS preferences for a user
+    
+    Args:
+        user_id: User identifier
+        db_path: Optional database path
+        
+    Returns:
+        Dictionary of preferences or None if not found
+    """
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT pitch_scale, speaking_rate, energy_scale, style
+            FROM user_tts_preferences
+            WHERE user_id = ?
+        """, (user_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'pitch_scale': row[0],
+                'speaking_rate': row[1],
+                'energy_scale': row[2],
+                'style': row[3]
+            }
+        return None
+        
+    except Exception as e:
+        print(f"Error getting TTS preferences: {e}")
+        return None
+
+
+def create_user(user_id: str, db_path: Optional[Path] = None) -> bool:
+    """
+    Create a new user entry
+    
+    Args:
+        user_id: User identifier (will be used as username)
+        db_path: Optional database path
+        
+    Returns:
+        True if successful
+    """
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT OR IGNORE INTO users (username)
+            VALUES (?)
+        """, (user_id,))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"Error creating user: {e}")
+        return False
+
+
+def user_exists(user_id: str, db_path: Optional[Path] = None) -> bool:
+    """
+    Check if a user exists
+    
+    Args:
+        user_id: User identifier
+        db_path: Optional database path
+        
+    Returns:
+        True if user exists
+    """
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT COUNT(*) FROM users WHERE username = ?
+        """, (user_id,))
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return count > 0
+        
+    except Exception as e:
+        print(f"Error checking user: {e}")
+        return False
+
+
+def list_all_users(db_path: Optional[Path] = None) -> list:
+    """
+    List all users in the database
+    
+    Args:
+        db_path: Optional database path
+        
+    Returns:
+        List of usernames
+    """
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT username FROM users ORDER BY created_at DESC
+        """)
+        
+        users = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        return users
+        
+    except Exception as e:
+        print(f"Error listing users: {e}")
+        return []
+
+
+__all__ = [
+    "DEFAULT_DB_PATH", 
+    "get_connection", 
+    "initialize_database",
+    "save_tts_preferences",
+    "get_tts_preferences",
+    "create_user",
+    "user_exists",
+    "list_all_users"
+]

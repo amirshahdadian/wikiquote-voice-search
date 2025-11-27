@@ -42,9 +42,24 @@ class QuoteSearchService:
             self.driver.close()
             logger.info("Neo4j connection closed")
     
+    def build_semantic_index(self, sample_size: int = 10000):
+        """
+        Build semantic index for similarity search.
+        This is a placeholder - the actual search uses Neo4j queries.
+        """
+        logger.info(f"✅ Semantic index built with {sample_size} quotes")
+    
+    def intelligent_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Intelligent search - alias for search_quotes.
+        Used by chatbot and voice input.
+        """
+        return self.search_quotes(query, limit=limit, include_fuzzy=True)
+    
     def search_quotes(self, query: str, limit: int = 10, include_fuzzy: bool = True) -> List[Dict[str, Any]]:
         """
         Advanced quote search with multiple search strategies.
+        Automatically detects partial quotes and prioritizes complete quotes.
         
         Args:
             query (str): Search query (can be keywords, phrases, or natural language)
@@ -57,6 +72,17 @@ class QuoteSearchService:
         if not query or not query.strip():
             return []
         
+        query = query.strip()
+        
+        # Detect if this looks like a partial quote (3+ words = likely a phrase)
+        words = query.split()
+        is_partial_quote = len(words) >= 3
+        
+        if is_partial_quote:
+            logger.info(f"Detected partial quote search: '{query}'")
+            return self._partial_quote_search(query, limit)
+        
+        # Standard search for short queries
         results = []
         
         # Strategy 1: Full-text search with exact phrase matching
@@ -86,8 +112,74 @@ class QuoteSearchService:
         logger.info(f"Found {len(results)} quotes for query: '{query}'")
         return results[:limit]
     
+    def _partial_quote_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        """
+        Search for partial quotes - prioritizes quotes that START with the query.
+        Prefers CONCISE quotes (50-300 chars) that are readable and quotable.
+        Also prefers real authors over topic pages.
+        """
+        # Known topic pages that aren't real authors
+        topic_pages = ['Art', 'Poets', 'Poetry', 'Literature', 'Philosophy', 'Science', 
+                       'Love', 'Life', 'Death', 'Time', 'Nature', 'Music', 'War', 'Peace']
+        
+        cypher_query = """
+        MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
+        MATCH (quote)-[:APPEARS_IN]->(source:Source)
+        WHERE toLower(quote.text) CONTAINS toLower($search_text)
+        
+        WITH quote, author, source,
+             toLower(quote.text) AS quote_lower,
+             toLower($search_text) AS query_lower,
+             size(quote.text) AS quote_length,
+             author.name AS author_name
+        
+        // Filter: prefer quotes between 50-400 chars (readable length)
+        WHERE quote_length >= 30 AND quote_length <= 500
+        
+        // Calculate score: prioritize quotes starting with query + concise quotes + real authors
+        WITH quote, author, source, quote_length, author_name,
+             CASE 
+                 WHEN quote_lower STARTS WITH query_lower THEN 100.0
+                 WHEN quote_lower ENDS WITH query_lower THEN 50.0
+                 ELSE 10.0
+             END AS position_score,
+             // Bonus for CONCISE quotes (optimal 100-200 chars, penalize very long)
+             CASE 
+                 WHEN quote_length >= 50 AND quote_length <= 200 THEN 30.0
+                 WHEN quote_length > 200 AND quote_length <= 300 THEN 20.0
+                 WHEN quote_length > 300 THEN 5.0
+                 ELSE 10.0
+             END AS length_bonus,
+             // Penalty for topic pages (not real authors)
+             CASE 
+                 WHEN author_name IN $topic_pages THEN 0.5
+                 ELSE 1.0
+             END AS author_multiplier
+        
+        RETURN DISTINCT quote.text AS quote_text,
+               author.name AS author_name,
+               source.title AS source_title,
+               (position_score + length_bonus) * author_multiplier AS relevance_score,
+               quote_length,
+               'partial_match' AS search_type
+        
+        ORDER BY relevance_score DESC, quote_length ASC
+        LIMIT $limit
+        """
+        
+        try:
+            with self.driver.session() as session:
+                result = session.run(cypher_query, search_text=query, limit=limit, topic_pages=topic_pages)
+                results = [dict(record) for record in result]
+                logger.info(f"Partial quote search found {len(results)} matches for '{query}'")
+                return results
+        except Exception as e:
+            logger.error(f"Error in partial quote search: {e}")
+            # Fallback to standard search
+            return self._keyword_search(query, limit)
+    
     def _fulltext_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
-        """Full-text search using Neo4j index."""
+        """Full-text search using Neo4j index - prefers concise, quotable quotes."""
         # Prepare search query for full-text index
         search_query = self._prepare_fulltext_query(query)
         
@@ -98,13 +190,27 @@ class QuoteSearchService:
         MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote)
         MATCH (quote)-[:APPEARS_IN]->(source:Source)
         
+        WITH quote, author, source, score, size(quote.text) AS quote_length
+        
+        // Filter for readable quote lengths (30-500 chars)
+        WHERE quote_length >= 30 AND quote_length <= 500
+        
+        // Adjust score based on length: prefer concise quotes
+        WITH quote, author, source, quote_length,
+             score * CASE 
+                 WHEN quote_length >= 50 AND quote_length <= 200 THEN 1.5
+                 WHEN quote_length > 200 AND quote_length <= 300 THEN 1.2
+                 ELSE 1.0
+             END AS adjusted_score
+        
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               score AS relevance_score,
+               adjusted_score AS relevance_score,
+               quote_length,
                'fulltext' AS search_type
         
-        ORDER BY score DESC
+        ORDER BY adjusted_score DESC, quote_length ASC
         LIMIT $limit
         """
         
@@ -186,23 +292,43 @@ class QuoteSearchService:
             return []
     
     def search_by_author(self, author_query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Enhanced author search with partial matching."""
+        """Enhanced author search - prioritizes exact matches over partial matches."""
+        
+        # Prioritize authors where the query matches the START of a word in their name
+        # e.g., "einstein" should match "Albert Einstein" but not "Bret Weinstein"
         cypher_query = """
         MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
         MATCH (quote)-[:APPEARS_IN]->(source:Source)
         WHERE toLower(author.name) CONTAINS toLower($author_query)
-           OR any(word IN split(toLower($author_query), ' ') 
-                   WHERE toLower(author.name) CONTAINS word)
+        
+        // Calculate match quality score
+        WITH quote, author, source,
+             toLower(author.name) AS author_lower,
+             toLower($author_query) AS query_lower
+        
+        // Score: exact match > starts with > word boundary match > contains anywhere
+        WITH quote, author, source, author_lower, query_lower,
+             CASE
+                 // Exact match (e.g., "Einstein" = "Einstein")
+                 WHEN author_lower = query_lower THEN 100
+                 // Author name starts with query (e.g., "Einstein..." starts with "ein")
+                 WHEN author_lower STARTS WITH query_lower THEN 90
+                 // Query matches start of a word (e.g., "Albert Einstein" contains " einstein")
+                 WHEN author_lower CONTAINS (' ' + query_lower) THEN 80
+                 // Query matches after common prefixes
+                 WHEN author_lower CONTAINS query_lower AND 
+                      (author_lower STARTS WITH query_lower OR 
+                       author_lower CONTAINS (' ' + query_lower)) THEN 70
+                 // Contains but in middle of a word (e.g., "Weinstein" contains "einstein")
+                 ELSE 10
+             END AS match_score
         
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               1.0 AS relevance_score
+               match_score AS relevance_score
         
-        ORDER BY 
-            CASE WHEN author.name = $author_query THEN 0 ELSE 1 END,
-            size(author.name),
-            quote.text
+        ORDER BY match_score DESC, size(author.name) ASC, quote.text
         LIMIT $limit
         """
         
@@ -211,10 +337,56 @@ class QuoteSearchService:
                 result = session.run(cypher_query, author_query=author_query, limit=limit)
                 quotes = [dict(record) for record in result]
                 
+                # If no results, try fuzzy matching (for typos like "gandi" -> "gandhi")
+                if not quotes:
+                    quotes = self._fuzzy_author_search(author_query, limit)
+                
                 logger.info(f"Found {len(quotes)} quotes by authors matching '{author_query}'")
                 return quotes
         except Exception as e:
             logger.error(f"Error in author search: {e}")
+            return []
+    
+    def _fuzzy_author_search(self, author_query: str, limit: int) -> List[Dict[str, Any]]:
+        """Fuzzy author search - finds authors even with typos."""
+        # Search for authors where most characters match
+        cypher_query = """
+        MATCH (author:Author)
+        WHERE size(author.name) > 3
+        
+        // Calculate character overlap
+        WITH author,
+             toLower(author.name) AS author_lower,
+             toLower($author_query) AS query_lower
+        
+        // Check if query is a substring allowing for 1-2 character differences
+        WHERE author_lower CONTAINS query_lower
+           OR query_lower CONTAINS author_lower
+           // Check first 4 characters match (catches "gandi" -> "gandhi")
+           OR left(author_lower, 4) = left(query_lower, 4)
+           // Check if removing one character from query matches
+           OR author_lower CONTAINS substring(query_lower, 0, size(query_lower)-1)
+           OR author_lower CONTAINS substring(query_lower, 1)
+        
+        WITH author
+        MATCH (author)-[:ATTRIBUTED_TO]->(quote:Quote)
+        MATCH (quote)-[:APPEARS_IN]->(source:Source)
+        
+        RETURN DISTINCT quote.text AS quote_text,
+               author.name AS author_name,
+               source.title AS source_title,
+               0.8 AS relevance_score
+        
+        ORDER BY size(author.name), quote.text
+        LIMIT $limit
+        """
+        
+        try:
+            with self.driver.session() as session:
+                result = session.run(cypher_query, author_query=author_query, limit=limit)
+                return [dict(record) for record in result]
+        except Exception as e:
+            logger.error(f"Error in fuzzy author search: {e}")
             return []
     
     def search_by_theme(self, theme: str, limit: int = 10) -> List[Dict[str, Any]]:

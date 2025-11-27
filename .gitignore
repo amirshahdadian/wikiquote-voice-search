@@ -1,9 +1,11 @@
 # Large data files
-enwikiquote-20250601-pages-articles.xml
+enwikiquote-*.xml
 extracted_quotes.json
+*.xml.bz2
 
 # Environment and secrets
 .env
+.env.local
 *.log
 
 # Python
@@ -11,23 +13,66 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyc
 build/
 dist/
 *.egg-info/
 .Python
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 venv/
 env/
 ENV/
 .venv/
+*.venv
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Audio recordings (keep structure, ignore files)
+data/recordings/*.wav
+data/recordings/*.mp3
+data/recordings/*.m4a
+
+# Speaker embeddings (keep structure, ignore files)
+data/embeddings/*.pkl
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*.swp
+*.swo
+*~
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
+*.sublime-*
+.vscode/settings.json
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+Desktop.ini
+
+# Streamlit
+.streamlit/
+
+# Neo4j
+neo4j/
