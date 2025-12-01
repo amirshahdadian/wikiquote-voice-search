@@ -958,10 +958,23 @@ if page == "💬 Chatbot & Search":
                         # Add to chat
                         st.session_state.messages.append({"role": "user", "content": f"🎤 {normalized_text}"})
                         
-                        # Get response
+                        # Get response - use chatbot service for proper intent extraction
+                        # This handles "X quotes" → author search, "quotes about X" → topic search
                         with st.spinner("🔍 Searching quotes..."):
-                            search_service = get_search_service()
-                            results = search_service.intelligent_search(normalized_text, limit=10)
+                            if chatbot:
+                                # Use chatbot's intent extraction for better results
+                                intent = chatbot.extract_intent(normalized_text)
+                                search_service = get_search_service()
+                                
+                                if intent['type'] == 'author_search':
+                                    st.write(f"🔍 Searching for quotes by **{intent['author']}**")
+                                    results = search_service.search_by_author(intent['author'], limit=10)
+                                else:
+                                    results = search_service.search_quotes(intent['query'], limit=10)
+                            else:
+                                # Fallback to direct search
+                                search_service = get_search_service()
+                                results = search_service.intelligent_search(normalized_text, limit=10)
                         
                         if not results:
                             st.warning("No matching quotes found.")

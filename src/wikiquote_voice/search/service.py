@@ -117,6 +117,7 @@ class QuoteSearchService:
         Search for partial quotes - prioritizes quotes that START with the query.
         Prefers CONCISE quotes (50-300 chars) that are readable and quotable.
         Also prefers real authors over topic pages.
+        Falls back to keyword search if no exact partial match found.
         """
         # Known topic pages that aren't real authors
         topic_pages = ['Art', 'Poets', 'Poetry', 'Literature', 'Philosophy', 'Science', 
@@ -172,6 +173,12 @@ class QuoteSearchService:
                 result = session.run(cypher_query, search_text=query, limit=limit, topic_pages=topic_pages)
                 results = [dict(record) for record in result]
                 logger.info(f"Partial quote search found {len(results)} matches for '{query}'")
+                
+                # If no exact partial match, fallback to keyword search
+                if not results:
+                    logger.info(f"No partial match found, falling back to keyword search for '{query}'")
+                    return self._keyword_search(query, limit)
+                
                 return results
         except Exception as e:
             logger.error(f"Error in partial quote search: {e}")
