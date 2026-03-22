@@ -12,8 +12,7 @@ When users type part of a quote in the search interface, the system automaticall
 ### Detection
 
 The system automatically detects partial quotes vs keyword searches based on:
-- Query length (>15 characters)
-- Presence of common connecting words (the, and, but, with, etc.)
+- Word count (3+ words triggers the partial-quote search path)
 
 ### Search Strategy
 
@@ -57,9 +56,7 @@ query = "to be or not"
 
 Users can toggle TTS on/off using the "🔊 TTS" checkbox in the search interface.
 
-TTS is automatically triggered for:
-- All partial quote matches
-- Search results with 3 or fewer matches
+In the Search tab, TTS is triggered when the `🔊 TTS` checkbox is enabled.
 
 ## Code Integration
 
@@ -137,7 +134,6 @@ python test_autocomplete_tts.py --demo
 ## Requirements
 
 - **NeMo Toolkit**: `pip install nemo_toolkit[asr,tts]==1.21.0`
-- **scikit-learn**: `pip install scikit-learn`
 - Active Neo4j database with quotes indexed
 
 ## Configuration
@@ -147,7 +143,7 @@ python test_autocomplete_tts.py --demo
 Default settings for autocomplete TTS:
 ```python
 {
-    'pitch_shift': 1.0,      # Normal pitch
+    'pitch_scale': 1.0,      # Normal pitch
     'speaking_rate': 0.9,    # 90% speed (slightly slower)
     'energy_scale': 1.0      # Normal volume
 }
@@ -157,7 +153,7 @@ Default settings for autocomplete TTS:
 
 Partial quote detection threshold:
 ```python
-min_length = 15  # Minimum characters
+min_words = 3  # Minimum words
 ```
 
 ## Performance
@@ -185,7 +181,7 @@ min_length = 15  # Minimum characters
 ### No Search Results
 
 1. Verify Neo4j connection
-2. Check semantic index is built:
+2. Run search warmup hook (no semantic index is built in current version):
    ```python
    search_service.build_semantic_index(sample_size=5000)
    ```

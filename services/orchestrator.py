@@ -62,7 +62,7 @@ class VoiceOrchestrator:
         
         # Load enrolled users
         embeddings_dir = Path(Config.DATA_DIR) / "embeddings"
-        self.enrolled_users = self.speaker_id.get_all_enrolled_users(str(embeddings_dir))
+        self.enrolled_users = self.speaker_id.load_all_embeddings(str(embeddings_dir))
         logger.info(f"✅ Loaded {len(self.enrolled_users)} enrolled users")
         
         logger.info("🎉 Voice Orchestrator ready!")

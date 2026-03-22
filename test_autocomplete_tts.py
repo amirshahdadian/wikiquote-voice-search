@@ -35,8 +35,8 @@ def test_autocomplete_with_tts():
         search_service.connect()
         print("✅ Connected to Neo4j")
         
-        # Build semantic index
-        print("🔨 Building semantic search index...")
+        # Warmup hook
+        print("🔨 Running search warmup...")
         search_service.build_semantic_index(sample_size=5000)
         
         # Initialize TTS
@@ -88,11 +88,15 @@ def test_autocomplete_with_tts():
                 print(f"\n🔊 Generating TTS: {output_file}")
                 
                 try:
-                    tts_service.synthesize(
+                    tts_service.synthesize_personalized(
                         text=speech_text,
                         output_path=output_file,
-                        pitch_shift=1.0,
-                        speaking_rate=0.9
+                        preferences={
+                            "pitch_scale": 1.0,
+                            "speaking_rate": 0.9,
+                            "energy_scale": 1.0,
+                            "style": "neutral",
+                        },
                     )
                     print(f"   ✅ Audio saved to: {output_file}")
                     print(f"   🎵 Speech: {speech_text[:80]}...")
@@ -159,10 +163,15 @@ if results:
         speech_text = f'"{top_match["quote_text"]}" by {top_match["author_name"]}'
         
         # Synthesize to audio
-        tts.synthesize(
+        tts.synthesize_personalized(
             text=speech_text,
             output_path="autocomplete.wav",
-            speaking_rate=0.9  # Slightly slower for clarity
+            preferences={
+                "pitch_scale": 1.0,
+                "speaking_rate": 0.9,  # Slightly slower for clarity
+                "energy_scale": 1.0,
+                "style": "neutral",
+            }
         )
         
         print(f"🔊 Playing: {speech_text}")

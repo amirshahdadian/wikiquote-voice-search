@@ -44,10 +44,13 @@ class QuoteSearchService:
     
     def build_semantic_index(self, sample_size: int = 10000):
         """
-        Build semantic index for similarity search.
-        This is a placeholder - the actual search uses Neo4j queries.
+        Placeholder hook for semantic retrieval.
+        Current search remains Neo4j lexical/fuzzy query based.
         """
-        logger.info(f"✅ Semantic index built with {sample_size} quotes")
+        logger.info(
+            "Semantic index hook invoked (sample_size=%s), but no semantic index is built in this version",
+            sample_size,
+        )
     
     def intelligent_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
@@ -134,11 +137,11 @@ class QuoteSearchService:
              size(quote.text) AS quote_length,
              author.name AS author_name
         
-        // Filter: prefer quotes between 50-400 chars (readable length)
+        // Filter: prefer readable quote lengths
         WHERE quote_length >= 30 AND quote_length <= 500
         
         // Calculate score: prioritize quotes starting with query + concise quotes + real authors
-        WITH quote, author, source, quote_length, author_name,
+        WITH quote, author, source, quote_length, author_name, quote_lower, query_lower,
              CASE 
                  WHEN quote_lower STARTS WITH query_lower THEN 100.0
                  WHEN quote_lower ENDS WITH query_lower THEN 50.0
@@ -155,13 +158,20 @@ class QuoteSearchService:
              CASE 
                  WHEN author_name IN $topic_pages THEN 0.5
                  ELSE 1.0
-             END AS author_multiplier
+             END AS author_multiplier,
+             CASE
+                 WHEN quote_lower STARTS WITH query_lower THEN 'beginning'
+                 WHEN quote_lower ENDS WITH query_lower THEN 'end'
+                 WHEN quote_lower CONTAINS query_lower THEN 'middle'
+                 ELSE 'distributed'
+             END AS match_position
         
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               (position_score + length_bonus) * author_multiplier AS relevance_score,
+               ((position_score + length_bonus) * author_multiplier) / 130.0 AS relevance_score,
                quote_length,
+               match_position,
                'partial_match' AS search_type
         
         ORDER BY relevance_score DESC, quote_length ASC

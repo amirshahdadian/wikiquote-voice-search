@@ -95,14 +95,54 @@ def detect_query_type(text: str) -> str:
     Returns:
         "partial_quote" if it looks like part of a quote, "search" otherwise
     """
-    # Partial quote detection logic (same as search service)
-    is_partial_quote = len(text) > 15 and any(
-        char.isupper() for char in text
-    ) and not any(
-        keyword in text.lower() for keyword in ['find', 'search', 'about', 'quotes', 'quote about', 'me quotes']
+    # Keep aligned with search service behavior: 3+ words => partial-quote search path.
+    normalized = " ".join((text or "").strip().split())
+    return "partial_quote" if len(normalized.split()) >= 3 else "search"
+
+
+def detect_audio_format(audio_bytes: bytes) -> str:
+    """
+    Best-effort detection for audio MIME type based on file headers.
+    """
+    if not audio_bytes:
+        return "audio/wav"
+
+    # WAV header
+    if len(audio_bytes) >= 12 and audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE":
+        return "audio/wav"
+
+    # MP3 headers (ID3 tag or MPEG frame sync)
+    if audio_bytes[:3] == b"ID3":
+        return "audio/mp3"
+    if len(audio_bytes) >= 2 and audio_bytes[0] == 0xFF and (audio_bytes[1] & 0xE0) == 0xE0:
+        return "audio/mp3"
+
+    return "audio/wav"
+
+
+def format_relevance_badge(score: Any) -> str:
+    """
+    Render a stable relevance badge for mixed score scales.
+    """
+    if score is None:
+        return ""
+
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return ""
+
+    if value <= 1.0:
+        clamped = max(0, min(100, int(value * 100)))
+        label = f"📊 {clamped}% match"
+    else:
+        label = f"📊 score {value:.2f}"
+
+    return (
+        "<span style='background:#4CAF50;color:white;padding:2px 8px;"
+        "border-radius:10px;font-size:0.85em;'>"
+        f"{label}</span>"
     )
-    
-    return "partial_quote" if is_partial_quote else "search"
 
 def get_user_voice_preferences(user_id: str) -> Dict[str, Any]:
     """
@@ -338,8 +378,22 @@ def speak_quote(quote_text: str, author_name: str, output_path: str = None, voic
 
 # Initialize services in session state
 @st.cache_resource
+def ensure_local_storage():
+    """Initialize local SQLite schema once for app runtime."""
+    try:
+        from src.wikiquote_voice.storage.sqlite import initialize_database
+
+        db_path = initialize_database()
+        logger.info(f"Local storage ready at {db_path}")
+        return db_path
+    except Exception as e:
+        logger.warning(f"Failed to initialize local storage: {e}")
+        return None
+
+
+@st.cache_resource
 def get_search_service():
-    """Initialize and cache the search service WITH AUTOMATIC SIMILARITY SEARCH"""
+    """Initialize and cache the search service."""
     try:
         from src.wikiquote_voice.search.service import QuoteSearchService
         from src.wikiquote_voice.config import Config
@@ -355,10 +409,10 @@ def get_search_service():
         )
         service.connect()
         
-        # BUILD SEMANTIC INDEX AUTOMATICALLY on startup (runs once, cached)
-        with st.spinner("🔨 Building semantic search index... (one-time setup)"):
+        # Placeholder hook in service; no semantic index is built in this version.
+        with st.spinner("🔨 Running search warmup..."):
             service.build_semantic_index(sample_size=10000)
-            logger.info("✅ Semantic index built - similarity search enabled")
+            logger.info("✅ Search warmup complete")
         
         return service
     except Exception as e:
@@ -412,8 +466,11 @@ def check_service_availability():
 
 # Header
 st.markdown('<p class="main-header">📚 Wikiquote Voice Search</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Search 858,972 quotes from 247,566 authors with AI-powered similarity</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Search 858,972 quotes from 247,566 authors with graph-powered retrieval</p>', unsafe_allow_html=True)
 st.markdown("---")
+
+# Ensure local DB tables exist (users, preferences, TTS profile storage, etc.)
+ensure_local_storage()
 
 # Sidebar - Navigation only
 with st.sidebar:
@@ -631,7 +688,7 @@ if page == "💬 Chatbot & Search":
                                 st.info("🔊 **Playing the best match:**")
                                 
                                 # Auto-play audio
-                                st.audio(audio_bytes, format='audio/mpeg', autoplay=True)
+                                st.audio(audio_bytes, format=detect_audio_format(audio_bytes), autoplay=True)
                                 
                                 # Show quote text in expander (collapsed by default)
                                 with st.expander("📖 Click to see the full quote text"):
@@ -650,8 +707,9 @@ if page == "💬 Chatbot & Search":
                                             badges = []
                                             
                                             if 'relevance_score' in quote and quote['relevance_score'] is not None:
-                                                score_pct = int(quote['relevance_score'] * 100)
-                                                badges.append(f"<span style='background:#4CAF50;color:white;padding:2px 8px;border-radius:10px;font-size:0.85em;'>📊 {score_pct}% match</span>")
+                                                badge = format_relevance_badge(quote['relevance_score'])
+                                                if badge:
+                                                    badges.append(badge)
                                             
                                             if 'match_position' in quote and quote['match_position']:
                                                 position_icons = {
@@ -693,8 +751,9 @@ if page == "💬 Chatbot & Search":
                                     badges = []
                                     
                                     if 'relevance_score' in quote and quote['relevance_score'] is not None:
-                                        score_pct = int(quote['relevance_score'] * 100)
-                                        badges.append(f"<span style='background:#4CAF50;color:white;padding:2px 8px;border-radius:10px;font-size:0.85em;'>📊 {score_pct}% match</span>")
+                                        badge = format_relevance_badge(quote['relevance_score'])
+                                        if badge:
+                                            badges.append(badge)
                                     
                                     if 'match_position' in quote and quote['match_position']:
                                         position_icons = {
@@ -745,9 +804,8 @@ if page == "💬 Chatbot & Search":
             with st.spinner("🎲 Finding a random quote..."):
                 try:
                     # Get random quote
-                    results = search_service.search_quotes("", limit=1)
-                    if results:
-                        quote = results[0]
+                    quote = search_service.get_random_quote()
+                    if quote:
                         st.markdown(f"""
                         <div class="quote-box">
                             <div class="quote-text">"{quote.get('quote_text', 'N/A')}"</div>
@@ -982,6 +1040,11 @@ if page == "💬 Chatbot & Search":
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         else:
                             first_quote = results[0]
+                            query_type = (
+                                "partial_quote"
+                                if first_quote.get("search_type") == "partial_match"
+                                else "search"
+                            )
                             
                             # For partial quotes: just speak the matching quote text
                             if query_type == "partial_quote":
@@ -1007,7 +1070,7 @@ if page == "💬 Chatbot & Search":
                                     )
                                 
                                 # Play audio
-                                st.audio(tts_audio_bytes, format='audio/wav', autoplay=True)
+                                st.audio(tts_audio_bytes, format=detect_audio_format(tts_audio_bytes), autoplay=True)
                                 st.success("🔊 Voice response played!")
                             
                             except Exception as e:
@@ -1111,6 +1174,11 @@ if page == "💬 Chatbot & Search":
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         else:
                             first_quote = results[0]
+                            query_type = (
+                                "partial_quote"
+                                if first_quote.get("search_type") == "partial_match"
+                                else "search"
+                            )
                             
                             # For partial quotes: just speak the matching quote text
                             if query_type == "partial_quote":
@@ -1136,7 +1204,7 @@ if page == "💬 Chatbot & Search":
                                     )
                                 
                                 # Play audio
-                                st.audio(tts_audio_bytes, format='audio/wav', autoplay=True)
+                                st.audio(tts_audio_bytes, format=detect_audio_format(tts_audio_bytes), autoplay=True)
                                 st.success("🔊 Voice response played!")
                             
                             except Exception as e:
@@ -1589,11 +1657,15 @@ elif page == "🔊 Text-to-Speech":
                 output_path = Path("data/recordings") / f"tts_{int(time.time())}.wav"
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                tts_service.synthesize(
+                tts_service.synthesize_personalized(
                     text=text_input,
                     output_path=str(output_path),
-                    pitch_shift=pitch,
-                    speaking_rate=rate
+                    preferences={
+                        "pitch_scale": pitch,
+                        "speaking_rate": rate,
+                        "energy_scale": 1.0,
+                        "style": "neutral",
+                    },
                 )
                 
                 st.success("✅ Speech generated successfully!")

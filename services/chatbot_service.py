@@ -4,7 +4,7 @@ Chatbot Service for conversational quote search
 
 import logging
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from src.wikiquote_voice.search.service import QuoteSearchService
 from src.wikiquote_voice.config import Config
 
@@ -19,7 +19,7 @@ class ChatbotService:
     """
     
     def __init__(self):
-        """Initialize chatbot with search service AND semantic index"""
+        """Initialize chatbot with search service and warmup hook."""
         logger.info("Initializing Chatbot service...")
         self.search_service = QuoteSearchService(
             Config.NEO4J_URI,
@@ -28,12 +28,12 @@ class ChatbotService:
         )
         self.search_service.connect()
         
-        # BUILD SEMANTIC INDEX for similarity search
-        logger.info("🔨 Building semantic index for chatbot...")
+        # Placeholder warmup hook; no semantic index is built in current service.
+        logger.info("🔨 Running search warmup for chatbot...")
         self.search_service.build_semantic_index(sample_size=10000)
-        logger.info("✅ Chatbot service initialized with semantic search")
+        logger.info("✅ Chatbot service initialized")
     
-    def extract_intent(self, message: str) -> Dict[str, any]:
+    def extract_intent(self, message: str) -> Dict[str, Any]:
         """
         Extract search intent from user message
         
@@ -124,7 +124,7 @@ class ChatbotService:
         if query_type == "author":
             response_parts.append(f"by {quotes[0].get('author_name', 'this author')}")
         elif query_type == "topic":
-            response_parts.append(f"about {query_type}")
+            response_parts.append("for that topic")
         
         response = " ".join(response_parts) + ":\n\n"
         

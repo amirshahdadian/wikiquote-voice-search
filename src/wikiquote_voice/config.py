@@ -59,3 +59,11 @@ class Config:
     DB_PATH: Path = _get_path_var("DB_PATH", DATA_DIR / "wikiquote_voice.db")
     QUOTES_FILE: Path = _get_path_var("QUOTES_FILE", DATA_DIR / "extracted_quotes.json")
     XML_FILE: Path = _get_path_var("XML_FILE", Path("enwikiquote-20250601-pages-articles.xml"))
+
+    # Parser Configuration - Quote Validation
+    QUOTE_MIN_LENGTH: int = int(get_env_var("QUOTE_MIN_LENGTH", "15"))
+    QUOTE_MAX_LENGTH: int = int(get_env_var("QUOTE_MAX_LENGTH", "500"))
+    QUOTE_MIN_WORDS: int = int(get_env_var("QUOTE_MIN_WORDS", "3"))
+    QUOTE_MAX_WORDS: int = int(get_env_var("QUOTE_MAX_WORDS", "80"))
+    QUOTE_MAX_SENTENCES: int = int(get_env_var("QUOTE_MAX_SENTENCES", "4"))
+    QUOTE_MIN_ALPHA_RATIO: float = float(get_env_var("QUOTE_MIN_ALPHA_RATIO", "0.5"))
