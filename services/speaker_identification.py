@@ -4,12 +4,17 @@ Enables user enrollment and recognition based on voice embeddings
 """
 
 import logging
+import os
+import tempfile
 import numpy as np
-import torch
 import pickle
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
+import librosa
 import soundfile as sf
+
+from src.wikiquote_voice.config import Config
+from src.wikiquote_voice.nemo_compat import load_nemo_speaker_model, resolve_nemo_device
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,7 +35,7 @@ class SpeakerIdentificationService:
             device: Device to run on (cpu or cuda)
         """
         self.threshold = threshold
-        self.device = device
+        self.device = resolve_nemo_device(device)
         self.model = None
         logger.info(f"Initializing Speaker ID Service (threshold={threshold}, device={device})")
         
@@ -38,13 +43,12 @@ class SpeakerIdentificationService:
         """Load TitaNet speaker recognition model from NeMo"""
         if self.model is None:
             try:
-                from nemo.collections.asr.models import EncDecSpeakerLabelModel
-                
-                logger.info("Loading NeMo TitaNet model...")
-                # Load pre-trained TitaNet model
-                self.model = EncDecSpeakerLabelModel.from_pretrained("nvidia/speakerverification_en_titanet_large")
-                self.model.eval()
-                self.model.to(self.device)
+                logger.info(
+                    "Loading NeMo 2.x speaker model '%s' on %s...",
+                    Config.NEMO_SPEAKER_MODEL,
+                    self.device,
+                )
+                self.model = load_nemo_speaker_model(self.device)
                 
                 logger.info("✅ TitaNet model loaded successfully")
                 
@@ -66,12 +70,15 @@ class SpeakerIdentificationService:
         
         logger.info(f"Extracting embedding from: {audio_path}")
         
+        normalized_audio_path = None
         try:
+            normalized_audio_path = self._prepare_audio_for_embedding(audio_path)
+
             # Get embedding from model
-            embedding = self.model.get_embedding(audio_path)
+            embedding = self.model.get_embedding(normalized_audio_path)
             
             # Convert to numpy
-            if torch.is_tensor(embedding):
+            if hasattr(embedding, "detach") and hasattr(embedding, "cpu"):
                 embedding_np = embedding.cpu().detach().numpy()
             else:
                 embedding_np = np.array(embedding)
@@ -85,6 +92,30 @@ class SpeakerIdentificationService:
         except Exception as e:
             logger.error(f"Error extracting embedding: {e}")
             raise
+        finally:
+            if normalized_audio_path and normalized_audio_path != audio_path and os.path.exists(normalized_audio_path):
+                os.unlink(normalized_audio_path)
+
+    def _prepare_audio_for_embedding(self, audio_path: str, target_sr: int = 16000) -> str:
+        """
+        Normalize arbitrary input audio into a mono 16 kHz WAV file for NeMo.
+
+        NeMo speaker embedding expects 16 kHz mono input. Microphone recordings
+        from Streamlit can carry an extra channel axis, which causes shape errors
+        inside the NeMo preprocessor if passed through untouched.
+        """
+        waveform, sample_rate = librosa.load(audio_path, sr=target_sr, mono=True)
+
+        if waveform.size == 0:
+            raise ValueError("Audio file is empty")
+
+        waveform = np.asarray(waveform, dtype=np.float32).reshape(-1)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            normalized_path = tmp_file.name
+
+        sf.write(normalized_path, waveform, target_sr, subtype="PCM_16")
+        return normalized_path
     
     def enroll_speaker(self, user_id: str, audio_files: List[str]) -> np.ndarray:
         """

@@ -21,10 +21,7 @@ class QuoteSearchService:
     def connect(self):
         """Establish connection to Neo4j database."""
         try:
-            self.driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
-            # Test the connection
-            with self.driver.session() as session:
-                session.run("RETURN 1")
+            self.driver = self._create_verified_driver(self.uri)
             logger.info("Successfully connected to Neo4j database")
         except AuthError:
             logger.error("Authentication failed. Please check your username and password.")
@@ -35,6 +32,43 @@ class QuoteSearchService:
         except Exception as e:
             logger.error(f"Failed to connect to Neo4j: {e}")
             raise
+
+    def _create_verified_driver(self, uri: str):
+        """
+        Create and verify a Neo4j driver.
+
+        Single-instance local Neo4j deployments often expose Bolt without routing.
+        If a ``neo4j://`` URI fails due to missing routing information, retry the
+        same endpoint with ``bolt://`` automatically.
+        """
+        driver = GraphDatabase.driver(uri, auth=(self.username, self.password))
+        try:
+            driver.verify_connectivity()
+            return driver
+        except ServiceUnavailable as exc:
+            message = str(exc)
+            should_retry_with_bolt = (
+                uri.startswith("neo4j://")
+                and "routing information" in message.lower()
+            )
+            driver.close()
+
+            if not should_retry_with_bolt:
+                raise
+
+            fallback_uri = "bolt://" + uri[len("neo4j://") :]
+            logger.warning(
+                "Neo4j routing unavailable for %s; retrying direct Bolt connection via %s",
+                uri,
+                fallback_uri,
+            )
+            fallback_driver = GraphDatabase.driver(
+                fallback_uri,
+                auth=(self.username, self.password),
+            )
+            fallback_driver.verify_connectivity()
+            self.uri = fallback_uri
+            return fallback_driver
     
     def close(self):
         """Close the Neo4j connection."""
@@ -77,9 +111,7 @@ class QuoteSearchService:
         
         query = query.strip()
         
-        # Detect if this looks like a partial quote (3+ words = likely a phrase)
-        words = query.split()
-        is_partial_quote = len(words) >= 3
+        is_partial_quote = self._looks_like_partial_quote(query)
         
         if is_partial_quote:
             logger.info(f"Detected partial quote search: '{query}'")
@@ -114,6 +146,33 @@ class QuoteSearchService:
         
         logger.info(f"Found {len(results)} quotes for query: '{query}'")
         return results[:limit]
+
+    def _looks_like_partial_quote(self, query: str) -> bool:
+        """
+        Distinguish quote fragments from natural-language search commands.
+
+        A simple word-count rule incorrectly routes requests like
+        ``quotes about courage and fear`` into the partial quote path.
+        """
+        normalized = " ".join(query.lower().split())
+        words = normalized.split()
+
+        if len(words) < 3:
+            return False
+
+        if re.search(
+            r"\b(find|search|show|get|give|tell|want|need|looking)\b",
+            normalized,
+        ):
+            return False
+
+        if re.search(r"\bquotes?\s+(about|on|regarding|by|from)\b", normalized):
+            return False
+
+        if normalized.startswith(("who said ", "who wrote ")):
+            return False
+
+        return True
     
     def _partial_quote_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
         """

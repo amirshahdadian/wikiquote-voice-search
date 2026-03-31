@@ -10,7 +10,13 @@ from pathlib import Path
 import tempfile
 import sqlite3
 from typing import Optional, Dict, Any
-import torch
+
+from src.wikiquote_voice.config import Config
+from src.wikiquote_voice.nemo_compat import (
+    load_nemo_tts_spec_model,
+    load_nemo_tts_vocoder,
+    resolve_nemo_device,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,7 +36,7 @@ class TTSService:
             device: Device to run on (cpu or cuda)
             db_path: Path to SQLite database with user preferences
         """
-        self.device = device
+        self.device = resolve_nemo_device(device)
         self.db_path = db_path
         self.spec_generator = None
         self.vocoder = None
@@ -40,25 +46,30 @@ class TTSService:
         """Load FastPitch and HiFiGAN models"""
         if self.spec_generator is None or self.vocoder is None:
             try:
-                from nemo.collections.tts.models import FastPitchModel, HifiGanModel
-                
-                logger.info("Loading NeMo TTS models on cpu...")
-                
-                # Load FastPitch (spectrogram generator)
-                logger.info("Loading FastPitch model...")
-                self.spec_generator = FastPitchModel.from_pretrained("nvidia/tts_en_fastpitch")
-                self.spec_generator.eval()
-                
-                # Load HiFiGAN (vocoder)
-                logger.info("Loading HiFiGAN vocoder...")
-                self.vocoder = HifiGanModel.from_pretrained("nvidia/tts_hifigan")
-                self.vocoder.eval()
+                logger.info(
+                    "Loading NeMo 2.x TTS models on %s (spec=%s, vocoder=%s)...",
+                    self.device,
+                    Config.NEMO_TTS_SPEC_MODEL,
+                    Config.NEMO_TTS_VOCODER_MODEL,
+                )
+                self.spec_generator = load_nemo_tts_spec_model(self.device)
+                self.vocoder = load_nemo_tts_vocoder(self.device)
                 
                 logger.info("✅ TTS models loaded successfully")
                 
             except Exception as e:
                 logger.error(f"Failed to load TTS models: {e}")
                 raise
+
+    def _sample_rate(self, fallback: int = 22050) -> int:
+        """Infer the active vocoder sample rate when available."""
+        if self.vocoder is not None:
+            audio_processor = getattr(self.vocoder, "audio_to_melspec_precessor", None)
+            if audio_processor is not None:
+                sample_rate = getattr(audio_processor, "_sample_rate", None)
+                if sample_rate:
+                    return int(sample_rate)
+        return fallback
     
     def synthesize(self, text: str, output_path: str = None, sample_rate: int = 22050) -> np.ndarray:
         """
@@ -78,13 +89,12 @@ class TTSService:
         
         try:
             # Parse text with FastPitch
-            parsed = self.spec_generator.parse(text)
-            
-            # Generate spectrogram
-            spectrogram = self.spec_generator.generate_spectrogram(tokens=parsed)
-            
+            with self.spec_generator.nemo_infer():
+                parsed = self.spec_generator.parse(text)
+                spectrogram = self.spec_generator.generate_spectrogram(tokens=parsed)
+
             # Convert spectrogram to audio with HiFiGAN
-            with torch.no_grad():
+            with self.vocoder.nemo_infer():
                 audio = self.vocoder.convert_spectrogram_to_audio(spec=spectrogram)
                 
                 # Convert to numpy array
@@ -95,7 +105,7 @@ class TTSService:
             
             # Save to file if path provided
             if output_path:
-                sf.write(output_path, audio_np, sample_rate)
+                sf.write(output_path, audio_np, self._sample_rate(sample_rate))
                 logger.info(f"Audio saved to: {output_path}")
             
             logger.info("✅ Speech synthesis complete")
@@ -199,17 +209,18 @@ class TTSService:
         
         try:
             # Parse text with FastPitch
-            parsed = self.spec_generator.parse(text)
-            
-            # Generate spectrogram with personalized settings
-            spectrogram = self.spec_generator.generate_spectrogram(
-                tokens=parsed,
-                pitch_shift=preferences['pitch_scale'],
-                pace=1.0 / preferences['speaking_rate']  # Inverse for pace
-            )
+            speaking_rate = max(float(preferences['speaking_rate']), 0.1)
+
+            with self.spec_generator.nemo_infer():
+                parsed = self.spec_generator.parse(text)
+                spectrogram = self.spec_generator.generate_spectrogram(
+                    tokens=parsed,
+                    pitch_shift=preferences['pitch_scale'],
+                    pace=1.0 / speaking_rate,
+                )
             
             # Convert spectrogram to audio with HiFiGAN
-            with torch.no_grad():
+            with self.vocoder.nemo_infer():
                 audio = self.vocoder.convert_spectrogram_to_audio(spec=spectrogram)
                 
                 # Convert to numpy array
@@ -226,7 +237,7 @@ class TTSService:
             
             # Save to file if path provided
             if output_path:
-                sf.write(output_path, audio_np, sample_rate)
+                sf.write(output_path, audio_np, self._sample_rate(sample_rate))
                 logger.info(f"Audio saved to: {output_path}")
             
             logger.info("✅ Personalized speech synthesis complete")
@@ -255,8 +266,7 @@ class TTSService:
         
         try:
             # Generate audio
-            with torch.no_grad():
-                self.synthesize(text, output_path=tmp_path, sample_rate=sample_rate)
+            self.synthesize(text, output_path=tmp_path, sample_rate=sample_rate)
             
             # Read as bytes
             with open(tmp_path, 'rb') as f:
@@ -369,7 +379,7 @@ def demo_personalized_tts():
         
     except ImportError:
         print("\n❌ NeMo not installed!")
-        print("Install with: pip install nemo_toolkit[asr,tts]==1.21.0")
+        print('Install with: pip install "nemo-toolkit[asr,tts]>=2.4,<3"')
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback

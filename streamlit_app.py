@@ -5,11 +5,13 @@ All-in-one web application for searching quotes with text and voice
 
 import streamlit as st
 import sys
+import importlib.util
 from pathlib import Path
 import tempfile
 import os
 import time
 import logging
+import re
 from typing import List, Dict, Any, Optional
 
 # Add parent directory to path
@@ -95,9 +97,21 @@ def detect_query_type(text: str) -> str:
     Returns:
         "partial_quote" if it looks like part of a quote, "search" otherwise
     """
-    # Keep aligned with search service behavior: 3+ words => partial-quote search path.
     normalized = " ".join((text or "").strip().split())
-    return "partial_quote" if len(normalized.split()) >= 3 else "search"
+    words = normalized.lower().split()
+
+    if len(words) < 3:
+        return "search"
+
+    lowered = " ".join(words)
+    if re.search(r"\b(find|search|show|get|give|tell|want|need|looking)\b", lowered):
+        return "search"
+    if re.search(r"\bquotes?\s+(about|on|regarding|by|from)\b", lowered):
+        return "search"
+    if lowered.startswith(("who said ", "who wrote ")):
+        return "search"
+
+    return "partial_quote"
 
 
 def detect_audio_format(audio_bytes: bytes) -> str:
@@ -118,6 +132,57 @@ def detect_audio_format(audio_bytes: bytes) -> str:
         return "audio/mp3"
 
     return "audio/wav"
+
+
+def is_nemo_installed() -> bool:
+    """Check NeMo availability without importing its heavy runtime."""
+    return importlib.util.find_spec("nemo") is not None
+
+
+def get_uploaded_audio_suffix(uploaded_file: Any, default: str = ".wav") -> str:
+    """Preserve the uploaded audio container when saving temp files."""
+    suffix = Path(getattr(uploaded_file, "name", "")).suffix.lower()
+    return suffix if suffix else default
+
+
+def write_temp_audio_file(audio_bytes: bytes, suffix: str = ".wav") -> str:
+    """Persist audio bytes to a temporary file and return the path."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        tmp_file.write(audio_bytes)
+        return tmp_file.name
+
+
+def resolve_voice_search(chatbot: Any, raw_text: str, normalized_text: str, limit: int = 10) -> Dict[str, Any]:
+    """
+    Route a voice request through the same intent logic for recorded and uploaded audio.
+
+    Raw ASR text is better for intent detection because normalization strips words like
+    "quotes" and "about", which are needed to distinguish author from topic searches.
+    """
+    search_service = get_search_service()
+    intent_input = (raw_text or normalized_text or "").strip()
+    fallback_query = (normalized_text or raw_text or "").strip()
+
+    if chatbot and intent_input:
+        intent = chatbot.extract_intent(intent_input)
+        if intent["type"] == "author_search":
+            return {
+                "results": search_service.search_by_author(intent["author"], limit=limit),
+                "query": intent["author"],
+                "intent_type": intent["type"],
+            }
+
+        return {
+            "results": search_service.search_quotes(intent["query"], limit=limit),
+            "query": intent["query"],
+            "intent_type": intent["type"],
+        }
+
+    return {
+        "results": search_service.intelligent_search(fallback_query, limit=limit),
+        "query": fallback_query,
+        "intent_type": "topic_search",
+    }
 
 
 def format_relevance_badge(score: Any) -> str:
@@ -242,6 +307,40 @@ def save_user_voice_preferences(user_id: str, pitch: float, rate: float, energy:
 
 # Alias for the function
 save_user_tts_preferences = save_user_voice_preferences
+
+
+def queue_user_voice_preferences(user_id: str, preferences: Optional[Dict[str, Any]]) -> None:
+    """
+    Queue a user's voice profile to be applied on the next rerun.
+
+    Streamlit does not allow changing widget-backed session_state keys after the
+    widget has already been instantiated in the current script run.
+    """
+    if not preferences:
+        return
+
+    st.session_state["identified_user"] = user_id
+    st.session_state["_pending_voice_profile"] = {
+        "pitch": float(preferences["pitch_scale"]),
+        "rate": float(preferences["speaking_rate"]),
+        "energy": float(preferences["energy_scale"]),
+    }
+    st.session_state["_voice_profile_notice"] = (
+        f"Loaded {user_id}'s voice profile "
+        f"(pitch: {preferences['pitch_scale']:.1f}x, "
+        f"speed: {preferences['speaking_rate']:.1f}x)"
+    )
+
+
+def apply_pending_voice_preferences() -> None:
+    """Apply any queued voice profile before voice widgets are rendered."""
+    pending = st.session_state.pop("_pending_voice_profile", None)
+    if not pending:
+        return
+
+    st.session_state["voice_pitch"] = pending["pitch"]
+    st.session_state["voice_rate"] = pending["rate"]
+    st.session_state["voice_energy"] = pending["energy"]
 
 def identify_speaker_from_audio(audio_path: str) -> Optional[str]:
     """
@@ -457,9 +556,8 @@ def check_service_availability():
         pass
     
     try:
-        import nemo
-        services["nemo"] = True
-    except:
+        services["nemo"] = is_nemo_installed()
+    except Exception:
         pass
     
     return services
@@ -471,19 +569,27 @@ st.markdown("---")
 
 # Ensure local DB tables exist (users, preferences, TTS profile storage, etc.)
 ensure_local_storage()
+apply_pending_voice_preferences()
 
 # Sidebar - Navigation only
 with st.sidebar:
     st.title("🎯 Navigation")
+
+    page_options = [
+        "💬 Chatbot & Search",
+        "👥 Speaker Identification",
+        "🔊 Text-to-Speech",
+        "📊 Statistics"
+    ]
+
+    # Use an explicit key and a validated default to avoid generated widget-id state errors.
+    if "page" not in st.session_state or st.session_state.page not in page_options:
+        st.session_state.page = page_options[0]
     
     page = st.radio(
         "Select Feature:",
-        [
-            "💬 Chatbot & Search",
-            "👥 Speaker Identification",
-            "🔊 Text-to-Speech",
-            "📊 Statistics"
-        ],
+        page_options,
+        key="page",
         label_visibility="collapsed"
     )
     
@@ -500,12 +606,15 @@ with st.sidebar:
             st.session_state.voice_rate = 0.9
         if 'voice_energy' not in st.session_state:
             st.session_state.voice_energy = 1.0
+
+        if "_voice_profile_notice" in st.session_state:
+            st.info(f"🎙️ {st.session_state.pop('_voice_profile_notice')}")
         
         voice_pitch = st.slider(
             "Pitch", 
             min_value=0.5, 
             max_value=2.0, 
-            value=st.session_state.voice_pitch, 
+            key="voice_pitch",
             step=0.1,
             help="Higher = higher voice, Lower = deeper voice"
         )
@@ -514,7 +623,7 @@ with st.sidebar:
             "Speed", 
             min_value=0.5, 
             max_value=1.5, 
-            value=st.session_state.voice_rate, 
+            key="voice_rate",
             step=0.1,
             help="How fast the voice speaks"
         )
@@ -523,15 +632,10 @@ with st.sidebar:
             "Volume", 
             min_value=0.5, 
             max_value=1.5, 
-            value=st.session_state.voice_energy, 
+            key="voice_energy",
             step=0.1,
             help="Volume level"
         )
-        
-        # Save settings
-        st.session_state.voice_pitch = voice_pitch
-        st.session_state.voice_rate = voice_rate
-        st.session_state.voice_energy = voice_energy
         
         # Test voice button
         if st.button("🔊 Test Voice", use_container_width=True):
@@ -970,9 +1074,7 @@ if page == "💬 Chatbot & Search":
                 
                 if audio_data and st.button("📤 Send Voice Message", type="primary", use_container_width=True):
                     # Save audio temporarily
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                        tmp_file.write(audio_data)
-                        tmp_path = tmp_file.name
+                    tmp_path = write_temp_audio_file(audio_data, suffix=".wav")
                     
                     try:
                         # Transcribe (automatically uses 'small' model)
@@ -990,15 +1092,14 @@ if page == "💬 Chatbot & Search":
                         
                         if identified_user:
                             st.success(f"👤 **Identified:** {identified_user}")
-                            st.session_state.identified_user = identified_user
                             
                             # Load user's voice preferences for personalized TTS
                             user_prefs = get_user_voice_preferences(identified_user)
                             if user_prefs:
-                                st.session_state.voice_pitch = user_prefs['pitch_scale']
-                                st.session_state.voice_rate = user_prefs['speaking_rate']
-                                st.session_state.voice_energy = user_prefs['energy_scale']
-                                st.info(f"🎙️ Loaded **{identified_user}'s** voice profile (pitch: {user_prefs['pitch_scale']:.1f}x, speed: {user_prefs['speaking_rate']:.1f}x)")
+                                queue_user_voice_preferences(identified_user, user_prefs)
+                                st.rerun()
+                            else:
+                                st.session_state.identified_user = identified_user
                         else:
                             st.warning("👤 Speaker not identified - using default voice")
                         
@@ -1010,33 +1111,28 @@ if page == "💬 Chatbot & Search":
                             st.success(f"🎤 **You said:** {raw_text}")
                         
                         # Detect query type
-                        query_type = detect_query_type(normalized_text)
+                        display_text = raw_text or normalized_text
+                        query_type = detect_query_type(display_text)
                         st.write(f"📝 Query type: **{query_type}**")
                         
                         # Add to chat
-                        st.session_state.messages.append({"role": "user", "content": f"🎤 {normalized_text}"})
+                        st.session_state.messages.append({"role": "user", "content": f"🎤 {display_text}"})
                         
-                        # Get response - use chatbot service for proper intent extraction
-                        # This handles "X quotes" → author search, "quotes about X" → topic search
                         with st.spinner("🔍 Searching quotes..."):
-                            if chatbot:
-                                # Use chatbot's intent extraction for better results
-                                intent = chatbot.extract_intent(normalized_text)
-                                search_service = get_search_service()
-                                
-                                if intent['type'] == 'author_search':
-                                    st.write(f"🔍 Searching for quotes by **{intent['author']}**")
-                                    results = search_service.search_by_author(intent['author'], limit=10)
-                                else:
-                                    results = search_service.search_quotes(intent['query'], limit=10)
-                            else:
-                                # Fallback to direct search
-                                search_service = get_search_service()
-                                results = search_service.intelligent_search(normalized_text, limit=10)
+                            voice_search = resolve_voice_search(
+                                chatbot,
+                                raw_text=raw_text,
+                                normalized_text=normalized_text,
+                                limit=10,
+                            )
+                            results = voice_search["results"]
+                            resolved_query = voice_search["query"]
+                            if voice_search["intent_type"] == "author_search":
+                                st.write(f"🔍 Searching for quotes by **{resolved_query}**")
                         
                         if not results:
                             st.warning("No matching quotes found.")
-                            response = f"Sorry, I couldn't find any quotes matching '{normalized_text}'."
+                            response = f"Sorry, I couldn't find any quotes matching '{resolved_query}'."
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         else:
                             first_quote = results[0]
@@ -1098,7 +1194,7 @@ if page == "💬 Chatbot & Search":
                             # Add response to chat WITH quotes data for persistent display
                             st.session_state.messages.append({
                                 "role": "assistant",
-                                "content": f"Found quotes matching '{normalized_text}'",
+                                "content": f"Found quotes matching '{resolved_query}'",
                                 "quotes": results,  # Store all quotes for re-rendering
                                 "query_type": query_type
                             })
@@ -1121,10 +1217,10 @@ if page == "💬 Chatbot & Search":
                 
                 if uploaded_audio and st.button("📤 Process Audio", type="primary", use_container_width=True):
                     audio_bytes = uploaded_audio.read()
-                    
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                        tmp_file.write(audio_bytes)
-                        tmp_path = tmp_file.name
+                    tmp_path = write_temp_audio_file(
+                        audio_bytes,
+                        suffix=get_uploaded_audio_suffix(uploaded_audio),
+                    )
                     
                     try:
                         from services.asr_service import ASRService
@@ -1140,15 +1236,14 @@ if page == "💬 Chatbot & Search":
                         
                         if identified_user:
                             st.success(f"👤 **Identified:** {identified_user}")
-                            st.session_state.identified_user = identified_user
                             
                             # Load user's voice preferences
                             user_prefs = get_user_voice_preferences(identified_user)
                             if user_prefs:
-                                st.session_state.voice_pitch = user_prefs['pitch_scale']
-                                st.session_state.voice_rate = user_prefs['speaking_rate']
-                                st.session_state.voice_energy = user_prefs['energy_scale']
-                                st.info(f"🔊 Loaded {identified_user} voice settings")
+                                queue_user_voice_preferences(identified_user, user_prefs)
+                                st.rerun()
+                            else:
+                                st.session_state.identified_user = identified_user
                         
                         if raw_text != normalized_text:
                             st.success(f"🎤 **Heard:** {raw_text}")
@@ -1157,20 +1252,28 @@ if page == "💬 Chatbot & Search":
                             st.success(f"🎤 **You said:** {raw_text}")
                         
                         # Detect query type
-                        query_type = detect_query_type(normalized_text)
+                        display_text = raw_text or normalized_text
+                        query_type = detect_query_type(display_text)
                         st.write(f"📝 Query type: **{query_type}**")
                         
                         # Add to chat
-                        st.session_state.messages.append({"role": "user", "content": f"🎤 {normalized_text}"})
+                        st.session_state.messages.append({"role": "user", "content": f"🎤 {display_text}"})
                         
-                        # Get response
                         with st.spinner("🔍 Searching quotes..."):
-                            search_service = get_search_service()
-                            results = search_service.intelligent_search(normalized_text, limit=10)
+                            voice_search = resolve_voice_search(
+                                chatbot,
+                                raw_text=raw_text,
+                                normalized_text=normalized_text,
+                                limit=10,
+                            )
+                            results = voice_search["results"]
+                            resolved_query = voice_search["query"]
+                            if voice_search["intent_type"] == "author_search":
+                                st.write(f"🔍 Searching for quotes by **{resolved_query}**")
                         
                         if not results:
                             st.warning("No matching quotes found.")
-                            response = f"Sorry, I couldn't find any quotes matching '{normalized_text}'."
+                            response = f"Sorry, I couldn't find any quotes matching '{resolved_query}'."
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         else:
                             first_quote = results[0]
@@ -1232,7 +1335,7 @@ if page == "💬 Chatbot & Search":
                             # Add response to chat WITH quotes data for persistent display
                             st.session_state.messages.append({
                                 "role": "assistant",
-                                "content": f"Found quotes matching '{normalized_text}'",
+                                "content": f"Found quotes matching '{resolved_query}'",
                                 "quotes": results,  # Store all quotes for re-rendering
                                 "query_type": query_type
                             })
@@ -1250,16 +1353,12 @@ elif page == "👥 Speaker Identification":
     st.header("👥 Speaker Identification")
     st.markdown("Identify users by their unique voice using AI-powered speaker recognition.")
     
-    try:
-        import nemo
-        nemo_available = True
-    except ImportError:
-        nemo_available = False
+    nemo_available = is_nemo_installed()
     
     if not nemo_available:
         st.error("❌ Speaker Identification requires NeMo toolkit.")
         st.markdown("### 📦 Installation:")
-        st.code("pip install nemo_toolkit[asr,tts]==1.21.0", language="bash")
+        st.code('pip install "nemo-toolkit[asr,tts]>=2.4,<3"', language="bash")
         st.stop()
     
     from services.speaker_identification import SpeakerIdentificationService
@@ -1300,6 +1399,7 @@ elif page == "👥 Speaker Identification":
         )
         
         audio_to_identify = None
+        audio_identify_suffix = ".wav"
         
         if identify_method == "🎤 Record with Microphone":
             try:
@@ -1328,11 +1428,10 @@ elif page == "👥 Speaker Identification":
             uploaded_file = st.file_uploader("Upload audio file", type=['wav', 'mp3', 'm4a'], key="identify_upload")
             if uploaded_file:
                 audio_to_identify = uploaded_file.read()
+                audio_identify_suffix = get_uploaded_audio_suffix(uploaded_file)
         
         if audio_to_identify and st.button("🔍 Identify Speaker", type="primary", use_container_width=True):
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                tmp_file.write(audio_to_identify)
-                tmp_path = tmp_file.name
+            tmp_path = write_temp_audio_file(audio_to_identify, suffix=audio_identify_suffix)
             
             try:
                 with st.spinner("🔍 Identifying speaker..."):
@@ -1511,7 +1610,10 @@ elif page == "👥 Speaker Identification":
                 try:
                     # Save all uploaded files
                     for idx, uploaded_file in enumerate(uploaded_files):
-                        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
+                        tmp_file = tempfile.NamedTemporaryFile(
+                            delete=False,
+                            suffix=get_uploaded_audio_suffix(uploaded_file),
+                        )
                         tmp_file.write(uploaded_file.read())
                         tmp_file.close()
                         temp_files.append(tmp_file.name)
@@ -1561,6 +1663,7 @@ elif page == "👥 Speaker Identification":
         )
         
         audio_to_verify = None
+        audio_verify_suffix = ".wav"
         
         if verify_method == "🎤 Record with Microphone":
             try:
@@ -1589,11 +1692,10 @@ elif page == "👥 Speaker Identification":
             verify_file = st.file_uploader("Upload audio to verify", type=['wav', 'mp3', 'm4a'], key="verify_upload")
             if verify_file:
                 audio_to_verify = verify_file.read()
+                audio_verify_suffix = get_uploaded_audio_suffix(verify_file)
         
         if audio_to_verify and verify_user_id in enrolled_users and st.button("🔐 Verify Speaker", type="primary", use_container_width=True):
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                tmp_file.write(audio_to_verify)
-                tmp_path = tmp_file.name
+            tmp_path = write_temp_audio_file(audio_to_verify, suffix=audio_verify_suffix)
             
             try:
                 with st.spinner(f"🔐 Verifying against {verify_user_id}..."):
@@ -1619,16 +1721,12 @@ elif page == "🔊 Text-to-Speech":
     st.header("🔊 Text-to-Speech")
     st.markdown("Convert quotes to natural speech.")
     
-    try:
-        import nemo
-        nemo_available = True
-    except ImportError:
-        nemo_available = False
+    nemo_available = is_nemo_installed()
     
     if not nemo_available:
         st.error("❌ Text-to-Speech requires NeMo toolkit.")
         st.markdown("### 📦 Installation:")
-        st.code("pip install nemo_toolkit[asr,tts]==1.21.0", language="bash")
+        st.code('pip install "nemo-toolkit[asr,tts]>=2.4,<3"', language="bash")
         st.stop()
     
     from services.tts_service import TTSService

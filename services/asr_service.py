@@ -4,7 +4,7 @@ Supports multiple backends: Whisper (default), NeMo, and Wav2Vec2
 
 For best results, install optional backends:
 - Whisper (default): pip install openai-whisper
-- NeMo ASR (GPU, low-latency): pip install nemo_toolkit[asr]
+- NeMo ASR (GPU, low-latency): pip install "nemo-toolkit[asr]>=2.4,<3"
 - Wav2Vec2 (lightweight): pip install transformers librosa
 """
 
@@ -14,6 +14,8 @@ import os
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+from src.wikiquote_voice.nemo_compat import resolve_runtime_device
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,7 +50,7 @@ class ASRService:
             backend: ASR backend ('auto', 'whisper', 'nemo', 'wav2vec2')
         """
         self.model_name = model_name
-        self.device = device
+        self.device = resolve_runtime_device(device, allow_mps=True)
         self.backend = backend
         
         if USE_HYBRID:
@@ -56,14 +58,14 @@ class ASRService:
             self._service = HybridASRService(
                 backend=backend,
                 model_name=model_name,
-                device=device
+                device=self.device
             )
             logger.info(f"✅ Using Hybrid ASR (backend: {self._service.active_backend})")
         else:
             # Fallback to Whisper-only
             self.model = None
             logger.info(f"⚠️  Hybrid ASR not available, using Whisper only")
-            logger.info(f"Initializing Whisper ASR with model '{model_name}' on {device}")
+            logger.info(f"Initializing Whisper ASR with model '{model_name}' on {self.device}")
         
     def load_model(self):
         """Load ASR model (no-op if using hybrid service)"""

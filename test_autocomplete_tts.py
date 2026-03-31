@@ -16,8 +16,8 @@ from services.tts_service import TTSService
 import time
 
 
-def test_autocomplete_with_tts():
-    """Test autocomplete functionality with TTS output"""
+def run_autocomplete_with_tts_demo():
+    """Run the autocomplete + TTS integration demo."""
     
     print("\n" + "="*70)
     print("  AUTOCOMPLETE WITH TEXT-TO-SPEECH TEST")
@@ -119,7 +119,7 @@ def test_autocomplete_with_tts():
     except ImportError as e:
         print(f"\n❌ Missing dependencies: {e}")
         print("\nPlease install:")
-        print("  - NeMo toolkit: pip install nemo_toolkit[asr,tts]==1.21.0")
+        print('  - NeMo toolkit: pip install "nemo-toolkit[asr,tts]>=2.4,<3"')
         print("  - scikit-learn: pip install scikit-learn")
     
     except Exception as e:
@@ -191,4 +191,4 @@ if __name__ == "__main__":
     if args.demo:
         demo_usage()
     else:
-        test_autocomplete_with_tts()
+        run_autocomplete_with_tts_demo()

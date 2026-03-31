@@ -65,7 +65,11 @@ class GraphSearchAdapter:
 
         self.connect()
         try:
-            results = self._search_service.autocomplete(topic, limit=limit)
+            results = self._search_service.search_quotes(
+                topic,
+                limit=limit,
+                include_fuzzy=True,
+            )
         except Exception:
             logger.exception("Topic search failed for '%s'", topic)
             raise

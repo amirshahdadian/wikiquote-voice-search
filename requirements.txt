@@ -31,4 +31,4 @@ scipy>=1.11.0
 lxml>=4.9.0
 
 # Optional heavy dependency for Speaker ID + NeMo TTS:
-# nemo_toolkit[asr,tts]==1.21.0
+# nemo-toolkit[asr,tts]>=2.4,<3

@@ -60,6 +60,13 @@ class Config:
     QUOTES_FILE: Path = _get_path_var("QUOTES_FILE", DATA_DIR / "extracted_quotes.json")
     XML_FILE: Path = _get_path_var("XML_FILE", Path("enwikiquote-20250601-pages-articles.xml"))
 
+    # NeMo 2.x model configuration
+    NEMO_TTS_SPEC_MODEL: str = get_env_var("NEMO_TTS_SPEC_MODEL", "tts_en_fastpitch")
+    NEMO_TTS_VOCODER_MODEL: str = get_env_var("NEMO_TTS_VOCODER_MODEL", "tts_en_hifigan")
+    NEMO_SPEAKER_MODEL: str = get_env_var("NEMO_SPEAKER_MODEL", "titanet_large")
+    NEMO_ASR_MODEL: str = get_env_var("NEMO_ASR_MODEL", "stt_en_conformer_ctc_small")
+    NEMO_ASR_MULTILINGUAL_MODEL: str = get_env_var("NEMO_ASR_MULTILINGUAL_MODEL", "")
+
     # Parser Configuration - Quote Validation
     QUOTE_MIN_LENGTH: int = int(get_env_var("QUOTE_MIN_LENGTH", "15"))
     QUOTE_MAX_LENGTH: int = int(get_env_var("QUOTE_MAX_LENGTH", "500"))

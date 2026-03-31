@@ -44,6 +44,18 @@ class ChatbotService:
             dict with intent type and parameters
         """
         message_lower = message.lower().strip()
+
+        quote_lookup_match = re.search(r'who (?:said|wrote)\s+(.+)', message_lower)
+        if quote_lookup_match:
+            quote_fragment = quote_lookup_match.group(1).strip()
+            quote_fragment = re.sub(r'[?.!,;]+$', '', quote_fragment).strip()
+            if quote_fragment:
+                logger.info(f"Extracted quote lookup fragment: '{quote_fragment}' from message: '{message}'")
+                return {
+                    'type': 'topic_search',
+                    'query': quote_fragment,
+                    'limit': 5
+                }
         
         # Check for topic search first (more specific patterns)
         topic_patterns = [
@@ -74,7 +86,6 @@ class ChatbotService:
                 r'(?:show me|find|get)\s+(.+?)(?:\'s)?\s+quotes?',
                 r'(.+?)(?:\'s)?\s+quotes?$',
                 r'quotes?\s+(?:by|from)\s+(.+)',
-                r'who (?:said|wrote)\s+(.+)',
             ]
             
             for pattern in author_patterns:

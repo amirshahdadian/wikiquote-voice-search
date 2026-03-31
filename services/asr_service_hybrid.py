@@ -7,9 +7,16 @@ with intelligent routing and automatic fallback
 import logging
 import tempfile
 import os
+import importlib.util
 from pathlib import Path
 from typing import Optional, Dict, Any
-import torch
+
+from src.wikiquote_voice.config import Config
+from src.wikiquote_voice.nemo_compat import (
+    load_nemo_asr_model,
+    resolve_nemo_device,
+    resolve_runtime_device,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,7 +48,7 @@ class HybridASRService:
         """
         self.backend = backend
         self.model_name = model_name
-        self.device = self._detect_device() if device == "auto" else device
+        self.device = self._detect_device() if device == "auto" else resolve_runtime_device(device, allow_mps=True)
         
         # Available backends
         self.backends_available = self._check_backends()
@@ -61,39 +68,36 @@ class HybridASRService:
         self._wav2vec2_model = None
     
     def _detect_device(self) -> str:
-        """Detect best available device"""
-        if torch.cuda.is_available():
-            logger.info("✅ CUDA GPU detected")
-            return "cuda"
-        else:
-            logger.info("ℹ️  Using CPU")
-            return "cpu"
+        """Detect best available device without importing torch eagerly."""
+        device = resolve_runtime_device("auto", allow_mps=True)
+        logger.info("ℹ️  Using %s", device.upper())
+        return device
     
     def _check_backends(self) -> Dict[str, bool]:
         """Check which backends are available"""
         available = {}
         
         # Check Whisper
-        try:
-            import whisper
+        if importlib.util.find_spec("whisper") is not None:
             available['whisper'] = True
-        except ImportError:
+        else:
             available['whisper'] = False
             logger.warning("⚠️  Whisper not available (pip install openai-whisper)")
         
         # Check NeMo
-        try:
-            import nemo.collections.asr as nemo_asr
+        if importlib.util.find_spec("nemo.collections.asr") is not None:
             available['nemo'] = True
-        except ImportError:
+        else:
             available['nemo'] = False
             logger.info("ℹ️  NeMo ASR not available (optional)")
         
         # Check Wav2Vec2
-        try:
-            from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+        if (
+            importlib.util.find_spec("transformers") is not None
+            and importlib.util.find_spec("librosa") is not None
+        ):
             available['wav2vec2'] = True
-        except ImportError:
+        else:
             available['wav2vec2'] = False
             logger.info("ℹ️  Wav2Vec2 not available (optional)")
         
@@ -190,21 +194,26 @@ class HybridASRService:
     
     def _transcribe_nemo(self, audio_path: str, language: Optional[str] = None) -> Dict[str, Any]:
         """Transcribe using NVIDIA NeMo"""
-        import nemo.collections.asr as nemo_asr
-        
         if self._nemo_model is None:
-            # Use QuartzNet or Conformer-CTC for English
-            # For multilingual, use appropriate NeMo model
-            model_name = "QuartzNet15x5Base-En" if not language or language == 'en' else "stt_en_conformer_ctc_small"
-            logger.info(f"Loading NeMo ASR model '{model_name}'...")
-            self._nemo_model = nemo_asr.models.EncDecCTCModel.from_pretrained(model_name=model_name)
-            self._nemo_model.eval()
-            if self.device == "cuda":
-                self._nemo_model = self._nemo_model.to('cuda')
+            configured_model = (
+                Config.NEMO_ASR_MULTILINGUAL_MODEL
+                if language and language != "en" and Config.NEMO_ASR_MULTILINGUAL_MODEL
+                else Config.NEMO_ASR_MODEL
+            )
+            logger.info(
+                "Loading NeMo 2.x ASR model '%s' on %s...",
+                configured_model,
+                self.device,
+            )
+            self._nemo_model = load_nemo_asr_model(self.device, language=language)
         
         # Transcribe
-        transcriptions = self._nemo_model.transcribe([audio_path])
+        transcriptions = self._nemo_model.transcribe([audio_path], batch_size=1)
         text = transcriptions[0] if transcriptions else ""
+        if hasattr(text, "text"):
+            text = text.text
+        elif not isinstance(text, str):
+            text = str(text)
         
         return {
             'text': text.strip(),
@@ -217,7 +226,8 @@ class HybridASRService:
     
     def _transcribe_wav2vec2(self, audio_path: str, language: Optional[str] = None) -> Dict[str, Any]:
         """Transcribe using Wav2Vec2"""
-        from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+        import torch
+        from transformers import AutoProcessor, Wav2Vec2ForCTC
         import librosa
         
         if self._wav2vec2_model is None:
@@ -225,10 +235,10 @@ class HybridASRService:
             model_id = "facebook/wav2vec2-base-960h"
             logger.info(f"Loading Wav2Vec2 model '{model_id}'...")
             self._wav2vec2_model = Wav2Vec2ForCTC.from_pretrained(model_id)
-            self._wav2vec2_processor = Wav2Vec2Processor.from_pretrained(model_id)
+            self._wav2vec2_processor = AutoProcessor.from_pretrained(model_id)
             
-            if self.device == "cuda":
-                self._wav2vec2_model = self._wav2vec2_model.to('cuda')
+            if self.device in {"cuda", "mps"}:
+                self._wav2vec2_model = self._wav2vec2_model.to(self.device)
         
         # Load audio
         audio, sr = librosa.load(audio_path, sr=16000)
@@ -236,8 +246,8 @@ class HybridASRService:
         # Process
         inputs = self._wav2vec2_processor(audio, sampling_rate=16000, return_tensors="pt", padding=True)
         
-        if self.device == "cuda":
-            inputs = {k: v.to('cuda') for k, v in inputs.items()}
+        if self.device in {"cuda", "mps"}:
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
         # Inference
         with torch.no_grad():

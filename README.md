@@ -68,7 +68,8 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` with your Neo4j credentials.
+Edit `.env` with your Neo4j credentials. For a local single-instance Neo4j Desktop
+or server setup on macOS, prefer `bolt://127.0.0.1:7687` over `neo4j://127.0.0.1:7687`.
 
 ## Data Pipeline
 
@@ -115,8 +116,18 @@ python3 test_hybrid_asr.py
 Install NeMo only if you need these features (large dependency):
 
 ```bash
-pip install nemo_toolkit[asr,tts]==1.21.0
+pip install "nemo-toolkit[asr,tts]>=2.4,<3"
 ```
+
+The NeMo-backed services now target NeMo 2.x model names by default:
+
+- `NEMO_TTS_SPEC_MODEL=tts_en_fastpitch`
+- `NEMO_TTS_VOCODER_MODEL=tts_en_hifigan`
+- `NEMO_SPEAKER_MODEL=titanet_large`
+- `NEMO_ASR_MODEL=stt_en_conformer_ctc_small`
+
+On Apple Silicon, `auto` now prefers `mps` for Whisper and Wav2Vec2 workloads, while
+NeMo-backed services stay on CPU by default.
 
 Enroll users:
 

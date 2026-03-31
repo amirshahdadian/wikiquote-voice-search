@@ -11,8 +11,9 @@ When users type part of a quote in the search interface, the system automaticall
 
 ### Detection
 
-The system automatically detects partial quotes vs keyword searches based on:
-- Word count (3+ words triggers the partial-quote search path)
+The system automatically detects partial quotes vs keyword searches using a heuristic:
+- Quote fragments with 3+ words are treated as partial quotes.
+- Natural-language commands like `quotes about courage` or `show me Einstein quotes` stay on the normal search path.
 
 ### Search Strategy
 
@@ -133,8 +134,9 @@ python test_autocomplete_tts.py --demo
 
 ## Requirements
 
-- **NeMo Toolkit**: `pip install nemo_toolkit[asr,tts]==1.21.0`
+- **NeMo Toolkit**: `pip install "nemo-toolkit[asr,tts]>=2.4,<3"`
 - Active Neo4j database with quotes indexed
+- On Apple Silicon, ASR `auto` prefers PyTorch `mps`, while NeMo-backed TTS stays on CPU by default
 
 ## Configuration
 
@@ -153,7 +155,7 @@ Default settings for autocomplete TTS:
 
 Partial quote detection threshold:
 ```python
-min_words = 3  # Minimum words
+min_words = 3  # Minimum words before quote-fragment heuristics apply
 ```
 
 ## Performance
@@ -168,7 +170,7 @@ min_words = 3  # Minimum words
 
 1. Check NeMo installation:
    ```bash
-   python -c "import nemo; print('NeMo OK')"
+   python -c "import importlib.util; print(importlib.util.find_spec('nemo') is not None)"
    ```
 
 2. Check models are loading:

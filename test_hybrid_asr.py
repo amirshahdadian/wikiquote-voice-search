@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from services.asr_service import ASRService
 
 
-def test_hybrid_asr():
-    """Test hybrid ASR with different backends"""
+def run_hybrid_asr_demo():
+    """Run the hybrid ASR backend availability demo."""
     
     print("🎤 Testing Hybrid ASR Service")
     print("=" * 60)
@@ -65,7 +65,7 @@ def test_hybrid_asr():
     if not info['available_backends'].get('whisper', False):
         print("   pip install openai-whisper  # Required")
     if not info['available_backends'].get('nemo', False):
-        print("   pip install nemo_toolkit[asr]  # For GPU acceleration")
+        print('   pip install "nemo-toolkit[asr]>=2.4,<3"  # For GPU acceleration')
     if not info['available_backends'].get('wav2vec2', False):
         print("   pip install transformers librosa  # For fine-tuning")
 
@@ -74,14 +74,14 @@ def get_install_command(backend):
     """Get pip install command for a backend"""
     commands = {
         'whisper': 'openai-whisper',
-        'nemo': 'nemo_toolkit[asr]',
+        'nemo': '"nemo-toolkit[asr]>=2.4,<3"',
         'wav2vec2': 'transformers librosa'
     }
     return commands.get(backend, backend)
 
 
-def test_transcription(audio_path: str):
-    """Test actual transcription with a sample audio file"""
+def run_transcription_demo(audio_path: str):
+    """Run transcription against a sample audio file."""
     print(f"\n🎵 Testing transcription with: {audio_path}")
     print("=" * 60)
     
@@ -109,12 +109,12 @@ def test_transcription(audio_path: str):
 
 if __name__ == "__main__":
     # Test backend availability
-    test_hybrid_asr()
+    run_hybrid_asr_demo()
     
     # Test transcription if audio file provided
     if len(sys.argv) > 1:
         audio_path = sys.argv[1]
-        test_transcription(audio_path)
+        run_transcription_demo(audio_path)
     else:
         print("\n" + "=" * 60)
         print("💡 To test transcription, run:")
