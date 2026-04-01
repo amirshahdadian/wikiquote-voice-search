@@ -108,7 +108,8 @@ def main():
     
     print("\nNext steps:")
     print("  1. Test search: PYTHONPATH=src python3 -m wikiquote_voice.search.service --interactive")
-    print("  2. Run Streamlit: streamlit run streamlit_app.py")
+    print("  2. Start the backend: uvicorn backend.app.main:app --reload")
+    print("  3. Start the frontend: cd frontend && npm run dev")
 
 
 if __name__ == "__main__":

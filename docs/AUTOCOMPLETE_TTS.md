@@ -38,9 +38,7 @@ The top matching quote is automatically converted to speech:
 - Speaking rate: 0.9x (slightly slower for clarity)
 - Standard pitch and energy
 
-## Usage in Streamlit App
-
-### Search Tab
+## Usage in the App
 
 ```python
 # User types partial quote
@@ -53,28 +51,9 @@ query = "to be or not"
 # 4. Plays audio automatically
 ```
 
-### Enable/Disable TTS
-
-Users can toggle TTS on/off using the "🔊 TTS" checkbox in the search interface.
-
-In the Search tab, TTS is triggered when the `🔊 TTS` checkbox is enabled.
+TTS can be enabled in the voice-enabled UI flow or triggered directly from Python services.
 
 ## Code Integration
-
-### Using the Helper Function
-
-```python
-from streamlit_app import speak_quote
-
-# Generate TTS for a quote
-audio_bytes = speak_quote(
-    quote_text="To be or not to be, that is the question",
-    author_name="William Shakespeare"
-)
-
-# Play in Streamlit
-st.audio(audio_bytes, format='audio/wav')
-```
 
 ### Using Search Service Directly
 
@@ -125,11 +104,11 @@ Match:  end
 Run the test script to see autocomplete with TTS in action:
 
 ```bash
-# Full test with TTS generation
-python test_autocomplete_tts.py
+# Full demo with TTS generation
+python3 scripts/demo_autocomplete_tts.py
 
 # Show code example only
-python test_autocomplete_tts.py --demo
+python3 scripts/demo_autocomplete_tts.py --demo
 ```
 
 ## Requirements

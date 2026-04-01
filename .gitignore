@@ -85,3 +85,6 @@ neo4j/
 
 # Generated API audio
 data/api_audio/
+
+# Generated design exports
+stitch_exports/

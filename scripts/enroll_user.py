@@ -184,7 +184,7 @@ def enroll_user_interactive():
         print("Next steps:")
         print("  1. Test identification: python services/speaker_identification.py identify <audio.wav>")
         print("  2. Use in voice pipeline: python services/orchestrator.py")
-        print("  3. Try in Streamlit app: streamlit run streamlit_app.py")
+        print("  3. Start the app stack: uvicorn backend.app.main:app --reload")
         
     except Exception as e:
         print(f"\n❌ Enrollment failed: {e}")

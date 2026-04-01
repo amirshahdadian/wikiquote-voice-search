@@ -4,14 +4,12 @@ Wikiquote Voice Search is a monorepo for the "Which Quote?" NLP project. It buil
 
 - a modern web frontend with `Next.js`
 - a Python backend with `FastAPI`
-- the original `Streamlit` app, kept in the repository as a fallback/reference UI
 
 ## Current Status
 
 - Search pipeline: implemented and usable
 - FastAPI backend: implemented and usable
 - Next.js frontend: implemented as the new primary web interface
-- Streamlit app: still available for reference and fallback
 - Voice add-ons: implemented but optional (some features require heavy dependencies like NeMo)
 
 ## Core Capabilities
@@ -42,9 +40,11 @@ wikiquote-voice-search/
 │   ├── components/
 │   ├── lib/
 │   └── tests/
-├── streamlit_app.py
 ├── requirements.txt
 ├── scripts/
+│   ├── check_neo4j.py
+│   ├── demo_autocomplete_tts.py
+│   ├── demo_hybrid_asr.py
 │   ├── parse_wikitext.py
 │   ├── populate_neo4j.py
 │   ├── create_index.py
@@ -137,12 +137,6 @@ The frontend expects the API at `http://127.0.0.1:8000` by default. Override it 
 export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-## Streamlit Fallback
-
-```bash
-streamlit run streamlit_app.py
-```
-
 ## Run Search Service in CLI Mode
 
 ```bash
@@ -154,7 +148,7 @@ PYTHONPATH=src python3 -m wikiquote_voice.search.service --interactive
 ### ASR (works with Whisper by default)
 
 ```bash
-python3 test_hybrid_asr.py
+python3 scripts/demo_hybrid_asr.py
 ```
 
 ### Speaker Identification + NeMo TTS
@@ -192,6 +186,7 @@ python3 services/orchestrator.py
 ```bash
 ./venv/bin/python -m unittest discover -s tests -q
 python3 -m compileall backend src services tests
+python3 scripts/check_neo4j.py
 ```
 
 ### Frontend tests
