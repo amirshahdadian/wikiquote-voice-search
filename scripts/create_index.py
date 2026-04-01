@@ -40,12 +40,12 @@ def create_fulltext_index():
         logger.info("✅ Connected to Neo4j")
         
         with driver.session() as session:
-            # Create full-text index on Quote.text
-            logger.info("Creating full-text index on Quote.text...")
+            # Create full-text index across quote text plus denormalized provenance fields.
+            logger.info("Creating full-text index on Quote searchable fields...")
             
             index_query = """
             CREATE FULLTEXT INDEX quote_fulltext_index IF NOT EXISTS
-            FOR (q:Quote) ON EACH [q.text]
+            FOR (q:Quote) ON EACH [q.text, q.canonical_text, q.primary_author, q.primary_source, q.primary_page]
             """
             
             try:
@@ -63,6 +63,9 @@ def create_fulltext_index():
             additional_indexes = [
                 ("author_name_index", "CREATE INDEX author_name_index IF NOT EXISTS FOR (a:Author) ON (a.name)"),
                 ("source_title_index", "CREATE INDEX source_title_index IF NOT EXISTS FOR (s:Source) ON (s.title)"),
+                ("page_title_index", "CREATE INDEX page_title_index IF NOT EXISTS FOR (p:Page) ON (p.title)"),
+                ("quote_fingerprint_index", "CREATE INDEX quote_fingerprint_index IF NOT EXISTS FOR (q:Quote) ON (q.fingerprint)"),
+                ("occurrence_key_index", "CREATE INDEX occurrence_key_index IF NOT EXISTS FOR (o:QuoteOccurrence) ON (o.key)"),
             ]
             
             for index_name, query in additional_indexes:

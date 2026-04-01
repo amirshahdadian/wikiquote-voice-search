@@ -1,13 +1,18 @@
 # Wikiquote Voice Search
 
-Wikiquote Voice Search is a Python project for extracting quotes from Wikiquote dumps, loading them into Neo4j, and searching them through a Streamlit interface with optional voice features (ASR, speaker identification, and TTS).
+Wikiquote Voice Search is a monorepo for the "Which Quote?" NLP project. It builds a Wikiquote graph in Neo4j, supports quote autocomplete and retrieval, and exposes both:
+
+- a modern web frontend with `Next.js`
+- a Python backend with `FastAPI`
+- the original `Streamlit` app, kept in the repository as a fallback/reference UI
 
 ## Current Status
 
 - Search pipeline: implemented and usable
-- Streamlit app: implemented and usable
+- FastAPI backend: implemented and usable
+- Next.js frontend: implemented as the new primary web interface
+- Streamlit app: still available for reference and fallback
 - Voice add-ons: implemented but optional (some features require heavy dependencies like NeMo)
-- FastAPI service: **not present in current repository**
 
 ## Core Capabilities
 
@@ -16,7 +21,7 @@ Wikiquote Voice Search is a Python project for extracting quotes from Wikiquote 
 - Populate Neo4j graph (`Author`, `Quote`, `Source`)
 - Full-text and multi-strategy quote search
 - Author search with typo-tolerant fallback
-- Chat-style quote query flow in Streamlit
+- Chat-style quote query flow in FastAPI and Streamlit
 - Optional voice input/output:
   - ASR: Whisper / NeMo / Wav2Vec2 hybrid routing
   - Speaker ID: NeMo TitaNet embeddings
@@ -26,6 +31,17 @@ Wikiquote Voice Search is a Python project for extracting quotes from Wikiquote 
 
 ```text
 wikiquote-voice-search/
+├── backend/
+│   └── app/
+│       ├── main.py
+│       ├── routers/
+│       ├── schemas/
+│       └── state.py
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   ├── lib/
+│   └── tests/
 ├── streamlit_app.py
 ├── requirements.txt
 ├── scripts/
@@ -71,6 +87,14 @@ cp .env.example .env
 Edit `.env` with your Neo4j credentials. For a local single-instance Neo4j Desktop
 or server setup on macOS, prefer `bolt://127.0.0.1:7687` over `neo4j://127.0.0.1:7687`.
 
+### Frontend Setup
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
 ## Data Pipeline
 
 ### 1) Parse Wikiquote XML
@@ -91,7 +115,29 @@ python3 scripts/populate_neo4j.py
 python3 scripts/create_index.py
 ```
 
-## Run the App
+## Run the New Web App
+
+### 1) Start the FastAPI backend
+
+```bash
+source venv/bin/activate
+uvicorn backend.app.main:app --reload
+```
+
+### 2) Start the Next.js frontend
+
+```bash
+cd frontend
+npm run dev
+```
+
+The frontend expects the API at `http://127.0.0.1:8000` by default. Override it with:
+
+```bash
+export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
+
+## Streamlit Fallback
 
 ```bash
 streamlit run streamlit_app.py
@@ -144,15 +190,23 @@ python3 services/orchestrator.py
 ## Testing Utilities
 
 ```bash
-python3 test_connection.py
-python3 test_autocomplete_tts.py
-python3 test_hybrid_asr.py
+./venv/bin/python -m unittest discover -s tests -q
+python3 -m compileall backend src services tests
+```
+
+### Frontend tests
+
+```bash
+cd frontend
+npm run test
+npm run typecheck
 ```
 
 ## Notes
 
 - `build_semantic_index()` in search service is currently a warmup hook and does not build an actual semantic index.
 - Relevance scores are strategy-dependent and not all are normalized to the same scale.
+- Generated response audio is served from `data/api_audio/` through `GET /api/audio/{audio_id}`.
 
 ## License
 

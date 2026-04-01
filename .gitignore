@@ -74,5 +74,14 @@ Desktop.ini
 # Streamlit
 .streamlit/
 
+# Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/coverage/
+frontend/*.tsbuildinfo
+
 # Neo4j
 neo4j/
+
+# Generated API audio
+data/api_audio/

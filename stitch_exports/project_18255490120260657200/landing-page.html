@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Which Quote? | NLP University Project</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&amp;family=Work+Sans:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-primary-fixed-variant": "#31617a",
+              "outline-variant": "#abb3b7",
+              "primary-fixed-dim": "#acdbf9",
+              "on-secondary-fixed-variant": "#595c5e",
+              "secondary-dim": "#515356",
+              "on-tertiary-fixed-variant": "#4e5c73",
+              "on-error": "#fff7f6",
+              "on-primary": "#f2f8ff",
+              "primary-dim": "#275771",
+              "tertiary-dim": "#46546b",
+              "on-primary-container": "#265770",
+              "surface": "#f8f9fa",
+              "on-tertiary-container": "#445269",
+              "on-secondary-fixed": "#3d4042",
+              "outline": "#737c7f",
+              "primary": "#34647d",
+              "on-tertiary": "#f8f8ff",
+              "surface-dim": "#d1dce0",
+              "on-tertiary-fixed": "#324056",
+              "on-primary-fixed": "#0c445d",
+              "surface-container-high": "#e3e9ec",
+              "on-secondary": "#f8f9fb",
+              "error-dim": "#4e0309",
+              "secondary-container": "#e1e2e5",
+              "tertiary-fixed-dim": "#c6d5f1",
+              "surface-container-low": "#f1f4f6",
+              "primary-fixed": "#c4e7ff",
+              "inverse-on-surface": "#9b9d9e",
+              "on-error-container": "#752121",
+              "primary-container": "#c4e7ff",
+              "on-surface-variant": "#586064",
+              "secondary-fixed-dim": "#d3d4d7",
+              "on-secondary-container": "#505254",
+              "surface-bright": "#f8f9fa",
+              "surface-container-lowest": "#ffffff",
+              "inverse-surface": "#0c0f10",
+              "tertiary": "#526077",
+              "surface-container": "#eaeff1",
+              "secondary": "#5d5f61",
+              "on-surface": "#2b3437",
+              "tertiary-container": "#d4e3ff",
+              "tertiary-fixed": "#d4e3ff",
+              "surface-tint": "#34647d",
+              "on-background": "#2b3437",
+              "inverse-primary": "#b1e0ff",
+              "error": "#9f403d",
+              "error-container": "#fe8983",
+              "secondary-fixed": "#e1e2e5",
+              "surface-container-highest": "#dbe4e7",
+              "surface-variant": "#dbe4e7",
+              "background": "#f8f9fa"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Work Sans"],
+              "label": ["Work Sans"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .editorial-gradient {
+            background: linear-gradient(135deg, #34647d 0%, #275771 100%);
+        }
+        body {
+            font-family: 'Work Sans', sans-serif;
+            background-color: #f8f9fa;
+            color: #2b3437;
+        }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen">
+<!-- TopNavBar -->
+<header class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm dark:shadow-none">
+<nav class="flex justify-between items-center px-8 py-4 max-w-full mx-auto">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold tracking-tight text-cyan-900 dark:text-cyan-100 font-headline">Which Quote?</span>
+<div class="hidden md:flex gap-6 items-center">
+<a class="font-manrope text-sm font-medium tracking-tight text-slate-500 dark:text-slate-400 hover:text-cyan-600 transition-colors" href="#">Dashboard</a>
+<a class="font-manrope text-sm font-medium tracking-tight text-cyan-700 dark:text-cyan-300 border-b-2 border-cyan-700 pb-1" href="#">Discover</a>
+<a class="font-manrope text-sm font-medium tracking-tight text-slate-500 dark:text-slate-400 hover:text-cyan-600 transition-colors" href="#">About</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-cyan-800 dark:text-cyan-400 p-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 rounded-full active:scale-95 duration-200" data-icon="notifications">notifications</button>
+<div class="w-8 h-8 rounded-full bg-surface-container overflow-hidden">
+<img alt="User profile and settings" class="w-full h-full object-cover" data-alt="Close-up portrait of a professional male in a soft-lit academic environment wearing glasses and a neutral shirt" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAstNp1hJ7UkjsfHIlrWLOXPAnrHmVW4iSmmNPDnaQNjY82-iLtBS7qRk0nToO4N0gMilQWYkAcDBMqM93tb-BExwrFe4bRZXEKUNseC3mQ69Yan1uOy3NmQEMMU2N4J4Buve0xENRNsBfhfYuor4fbDCdIxXuw6ieu_b-Ge_nO_PH2mq6ZYUkhXk0aEMlnu-fY_vNmIjT7hcEDw5HRdklK6rrjWlKAD-B6CMw-uMaqmkCnYqrWxr8T6J_pNY4QvTnAYU_7fGVdU7CP"/>
+</div>
+</div>
+</nav>
+</header>
+<main class="flex-grow pt-24">
+<!-- Hero Section -->
+<section class="relative px-8 py-20 md:py-32 overflow-hidden bg-surface">
+<div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+<div class="lg:col-span-7 z-10">
+<span class="inline-block px-4 py-1.5 mb-6 text-xs font-semibold tracking-widest uppercase rounded-full bg-tertiary-container text-on-tertiary-container font-label">NLP University Project</span>
+<h1 class="font-headline text-5xl md:text-7xl font-extrabold text-on-surface tracking-tight mb-8 leading-tight">
+                        Voice-First <br/><span class="text-primary italic font-medium">Curated Wisdom.</span>
+</h1>
+<p class="font-body text-xl text-on-surface-variant max-w-xl mb-12 leading-relaxed">
+                        A multi-user voice assistant leveraging a massive Wikiquote graph database to autocomplete your thoughts with historical precision.
+                    </p>
+<div class="flex flex-wrap gap-4">
+<button class="editorial-gradient text-on-primary px-8 py-4 rounded-md font-medium text-lg flex items-center gap-2 hover:shadow-lg transition-all active:scale-95">
+                            Start Interaction
+                            <span class="material-symbols-outlined" data-icon="arrow_forward">arrow_forward</span>
+</button>
+<button class="bg-secondary-container text-on-secondary-container px-8 py-4 rounded-md font-medium text-lg hover:bg-surface-container-high transition-colors active:scale-95">
+                            Sign Up with Voice
+                        </button>
+</div>
+</div>
+<div class="lg:col-span-5 relative">
+<div class="relative w-full aspect-square rounded-xl overflow-hidden shadow-2xl">
+<img class="w-full h-full object-cover" data-alt="Abstract visualization of voice waves flowing into a geometric library structure with scholarly teal tones and soft ambient light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCb8nA7G-g6Mljjo-mqj6sIn5rSFLPUcui0qmPY2DOuBGMylYzp8LqG6yfPQ8WEXSYn8V5_En27aCSBw5JEmun7AyRK0DLK0EWhu0CHYe8HNyWnyncsRdd0-kK3tcul3E5Q9BfwbfjpdTMgXzK5SiFDDisdVLZcCauoiYLmp5b-nS_r0TcNmEdRLRjGAG81M6uOkL0R6fb65qmZn4ILzQGwEraq_2T6p_48DkD_Hg5kdi8RUV5mx9FxohhBGpyFojrfIbdowmc5uD_g"/>
+<div class="absolute inset-0 bg-primary/10 mix-blend-multiply"></div>
+</div>
+<!-- Floating Data Chip -->
+<div class="absolute -bottom-6 -left-6 bg-surface-container-lowest p-6 rounded-xl shadow-xl border border-outline-variant/15 max-w-xs backdrop-blur-md bg-white/90">
+<div class="flex items-center gap-3 mb-2">
+<span class="material-symbols-outlined text-primary" data-icon="hub">hub</span>
+<span class="font-label text-xs font-bold text-on-surface uppercase tracking-tighter">Graph Database</span>
+</div>
+<p class="text-sm font-body text-on-surface-variant">Connecting 450k+ nodes of historical discourse and attribution.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Bento Features Grid -->
+<section class="px-8 py-24 bg-surface-container-low">
+<div class="max-w-7xl mx-auto">
+<div class="mb-16">
+<h2 class="font-headline text-3xl font-bold text-on-surface mb-4">The Precision Layer</h2>
+<p class="font-body text-on-surface-variant max-w-2xl">Moving beyond simple text search, we employ sophisticated NLP architectures to understand the context of spoken words in real-time.</p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- Feature 1: Speaker Recognition -->
+<div class="md:col-span-2 bg-surface-container-lowest p-10 rounded-xl flex flex-col justify-between group hover:bg-surface-bright transition-all duration-300">
+<div>
+<span class="material-symbols-outlined text-primary text-4xl mb-6" data-icon="fingerprint">fingerprint</span>
+<h3 class="font-headline text-2xl font-bold mb-4">Multi-User Speaker Recognition</h3>
+<p class="font-body text-on-surface-variant text-lg leading-relaxed max-w-md">
+                                Intelligent diarization identifies individual contributors in a collaborative session, tailoring results to unique rhetorical styles.
+                            </p>
+</div>
+<div class="mt-12 flex gap-2">
+<span class="px-3 py-1 bg-surface-container-high rounded-full font-label text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">Active Learning</span>
+<span class="px-3 py-1 bg-surface-container-high rounded-full font-label text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">Low Latency</span>
+</div>
+</div>
+<!-- Feature 2: Quote Discovery -->
+<div class="bg-primary text-on-primary p-10 rounded-xl flex flex-col justify-between editorial-gradient">
+<div>
+<span class="material-symbols-outlined text-4xl mb-6" data-icon="auto_awesome">auto_awesome</span>
+<h3 class="font-headline text-2xl font-bold mb-4">Autocomplete Everything</h3>
+<p class="font-body text-on-primary/80 text-lg leading-relaxed">
+                                Our NLP core predicts and completes famous quotes as you speak them, pulling from a curated Wikiquote graph.
+                            </p>
+</div>
+<div class="mt-12">
+<span class="material-symbols-outlined text-5xl opacity-30" data-icon="format_quote">format_quote</span>
+</div>
+</div>
+<!-- Feature 3: TTS Responses -->
+<div class="bg-surface-container-lowest p-10 rounded-xl flex flex-col justify-between border border-outline-variant/10">
+<div>
+<span class="material-symbols-outlined text-primary text-4xl mb-6" data-icon="record_voice_over">record_voice_over</span>
+<h3 class="font-headline text-2xl font-bold mb-4">Personalized TTS</h3>
+<p class="font-body text-on-surface-variant text-lg leading-relaxed">
+                                Experience response interactions that feel human, using custom-tuned Text-to-Speech engines for natural research flow.
+                            </p>
+</div>
+</div>
+<!-- Feature 4: Academic Background -->
+<div class="md:col-span-2 bg-surface-container-highest p-10 rounded-xl relative overflow-hidden group">
+<div class="z-10 relative">
+<h3 class="font-headline text-2xl font-bold mb-4">Scholarly Foundations</h3>
+<p class="font-body text-on-surface-variant text-lg leading-relaxed max-w-lg">
+                                Developed as a capstone project for the NLP University Research Lab, Which Quote? explores the intersection of graph theory and conversational AI.
+                            </p>
+</div>
+<div class="absolute right-0 bottom-0 p-8">
+<span class="material-symbols-outlined text-[120px] text-primary/10 select-none translate-x-12 translate-y-12" data-icon="school">school</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Project Mission / Background -->
+<section class="px-8 py-32 bg-surface">
+<div class="max-w-5xl mx-auto text-center">
+<h2 class="font-label text-sm font-bold tracking-[0.3em] uppercase text-primary mb-6">The Methodology</h2>
+<h3 class="font-headline text-4xl md:text-5xl font-extrabold text-on-surface mb-12 tracking-tight">Bridging the gap between spoken word and archived human knowledge.</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-16 text-left items-center">
+<div class="space-y-6">
+<p class="font-body text-lg text-on-surface-variant leading-relaxed">
+                            At its core, "Which Quote?" isn't just an assistant; it's a digital curator. By mapping the vast landscape of Wikiquote into a multi-dimensional graph database, we enable semantic jumps that traditional databases cannot perform.
+                        </p>
+<p class="font-body text-lg text-on-surface-variant leading-relaxed">
+                            Whether you're writing a thesis or debating in a classroom, our real-time speaker recognition ensures that the context is always respected, and the attributions are always accurate.
+                        </p>
+</div>
+<div class="relative bg-surface-container p-8 rounded-xl border border-outline-variant/10">
+<div class="flex flex-col gap-4">
+<div class="flex items-center gap-4 p-4 bg-surface-container-lowest rounded-lg">
+<div class="w-10 h-10 rounded-full editorial-gradient flex items-center justify-center text-on-primary font-bold">1</div>
+<span class="font-label font-bold text-on-surface">Voice Input Analysis</span>
+</div>
+<div class="flex items-center gap-4 p-4 bg-surface-container-lowest rounded-lg">
+<div class="w-10 h-10 rounded-full editorial-gradient flex items-center justify-center text-on-primary font-bold">2</div>
+<span class="font-label font-bold text-on-surface">Semantic Graph Search</span>
+</div>
+<div class="flex items-center gap-4 p-4 bg-surface-container-lowest rounded-lg">
+<div class="w-10 h-10 rounded-full editorial-gradient flex items-center justify-center text-on-primary font-bold">3</div>
+<span class="font-label font-bold text-on-surface">Contextual TTS Synthesis</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 mt-auto bg-slate-50 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800">
+<div class="flex flex-col md:flex-row justify-between items-center px-12 max-w-full mx-auto gap-8">
+<div class="flex flex-col items-center md:items-start gap-2">
+<p class="font-work-sans text-xs uppercase tracking-widest text-slate-400">© 2024 Which Quote? | NLP University Project</p>
+</div>
+<div class="flex flex-wrap justify-center gap-8">
+<a class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors" href="#">Documentation</a>
+<a class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors" href="#">Privacy Policy</a>
+<a class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors" href="#">University Credits</a>
+</div>
+<div class="flex gap-4">
+<span class="material-symbols-outlined text-slate-400 hover:text-cyan-600 cursor-pointer transition-colors" data-icon="terminal">terminal</span>
+<span class="material-symbols-outlined text-slate-400 hover:text-cyan-600 cursor-pointer transition-colors" data-icon="science">science</span>
+</div>
+</div>
+</footer>
+</body></html>

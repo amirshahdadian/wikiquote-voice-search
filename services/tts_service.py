@@ -3,6 +3,7 @@ Text-to-Speech (TTS) Service using NVIDIA NeMo FastPitch + HiFiGAN
 Supports personalized voice output based on user preferences
 """
 
+from contextlib import nullcontext
 import logging
 import numpy as np
 import soundfile as sf
@@ -70,6 +71,47 @@ class TTSService:
                 if sample_rate:
                     return int(sample_rate)
         return fallback
+
+    def _inference_context(self):
+        """
+        Return a torch inference context without relying on NeMo 1.x helpers.
+
+        NeMo 2.x models no longer expose ``nemo_infer()``, so inference should
+        run directly against eval-mode models under ``torch.inference_mode()``.
+        """
+        try:
+            import torch
+
+            return torch.inference_mode()
+        except Exception:
+            return nullcontext()
+
+    def _apply_pitch_scale(self, audio: np.ndarray, sample_rate: int, pitch_scale: float) -> np.ndarray:
+        """
+        Apply a lightweight post-vocoder pitch adjustment when requested.
+
+        FastPitch personalization hooks changed in NeMo 2.x and the current
+        pretrained English model does not expose the old ``pitch_shift`` path.
+        We preserve user-level pitch customization by shifting the final
+        waveform when the stored preference differs from the neutral value.
+        """
+        resolved_pitch = float(pitch_scale)
+        if np.isclose(resolved_pitch, 1.0, atol=1e-3):
+            return audio
+
+        try:
+            import librosa
+
+            n_steps = float(12.0 * np.log2(max(resolved_pitch, 1e-3)))
+            shifted = librosa.effects.pitch_shift(
+                y=np.asarray(audio, dtype=np.float32),
+                sr=sample_rate,
+                n_steps=n_steps,
+            )
+            return np.asarray(shifted, dtype=np.float32)
+        except Exception as exc:
+            logger.warning("Pitch scaling fallback failed: %s", exc)
+            return audio
     
     def synthesize(self, text: str, output_path: str = None, sample_rate: int = 22050) -> np.ndarray:
         """
@@ -89,12 +131,12 @@ class TTSService:
         
         try:
             # Parse text with FastPitch
-            with self.spec_generator.nemo_infer():
+            with self._inference_context():
                 parsed = self.spec_generator.parse(text)
                 spectrogram = self.spec_generator.generate_spectrogram(tokens=parsed)
 
             # Convert spectrogram to audio with HiFiGAN
-            with self.vocoder.nemo_infer():
+            with self._inference_context():
                 audio = self.vocoder.convert_spectrogram_to_audio(spec=spectrogram)
                 
                 # Convert to numpy array
@@ -208,19 +250,20 @@ class TTSService:
         logger.info(f"Synthesizing: {text}")
         
         try:
+            resolved_sample_rate = self._sample_rate(sample_rate)
+
             # Parse text with FastPitch
             speaking_rate = max(float(preferences['speaking_rate']), 0.1)
 
-            with self.spec_generator.nemo_infer():
+            with self._inference_context():
                 parsed = self.spec_generator.parse(text)
                 spectrogram = self.spec_generator.generate_spectrogram(
                     tokens=parsed,
-                    pitch_shift=preferences['pitch_scale'],
                     pace=1.0 / speaking_rate,
                 )
             
             # Convert spectrogram to audio with HiFiGAN
-            with self.vocoder.nemo_infer():
+            with self._inference_context():
                 audio = self.vocoder.convert_spectrogram_to_audio(spec=spectrogram)
                 
                 # Convert to numpy array
@@ -229,6 +272,12 @@ class TTSService:
                 else:
                     audio_np = np.array(audio).squeeze()
             
+            audio_np = self._apply_pitch_scale(
+                audio=np.asarray(audio_np, dtype=np.float32),
+                sample_rate=resolved_sample_rate,
+                pitch_scale=preferences['pitch_scale'],
+            )
+
             # Apply energy scaling (volume)
             audio_np = audio_np * preferences['energy_scale']
             
@@ -237,7 +286,7 @@ class TTSService:
             
             # Save to file if path provided
             if output_path:
-                sf.write(output_path, audio_np, self._sample_rate(sample_rate))
+                sf.write(output_path, audio_np, resolved_sample_rate)
                 logger.info(f"Audio saved to: {output_path}")
             
             logger.info("✅ Personalized speech synthesis complete")

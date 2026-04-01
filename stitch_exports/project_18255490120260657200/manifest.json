@@ -1,0 +1,56 @@
+{
+  "projectId": "18255490120260657200",
+  "exportsDir": "stitch_exports/project_18255490120260657200",
+  "screens": [
+    {
+      "title": "Landing Page",
+      "id": "ebe247141494492eb182c56fd2393eb7",
+      "imageFile": "landing-page.png",
+      "codeFile": "landing-page.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/ADBb0ugyS_kcyBrqlycOcKq_tclIRVJqzIW3_vWlaL4xE5VmlZTSvmjLJe4_T_aq1MiR97OBp_DPFUg45IMKMRgnHe5CfjBqkhXO4CHL92MBEORWGefAKJqdgqhC4b1-yDczI8P-8sdL1_cYAd0DiOZSnSN9XmjdEI63VyM76gD_KD4lGy4uN7_BjUL220GigyqOaUE0u1afLp3CquXAloio8T_Fj49XDmQnTjHpTH79O4fJNQdSBF7mCOByiQTR",
+      "htmlUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sX2Y4ZTYwYmUyNTM0NDQzNDQ5YWFkMWU4ODdmZjJmM2MzEgsSBxCl_fCrhgUYAZIBJAoKcHJvamVjdF9pZBIWQhQxODI1NTQ5MDEyMDI2MDY1NzIwMA&filename=&opi=89354086"
+    },
+    {
+      "title": "Voice Registration",
+      "id": "78f66a7c048b445d862c7f797c6415b1",
+      "imageFile": "voice-registration.png",
+      "codeFile": "voice-registration.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/ADBb0ujx5bYIklZHK550B6MXr5opO20_Vsl0zJ1OQRIgg2Eq2UOErbH791owZAIIh77yFhRFWU5OJ8o6DTfRyJ79toy9ovGN27CBCh2SXbuqqKxYl0PaS6e5yLQIRUekbsYwdaayp7tvhLcbYNFLNMThJCRoTDnZWCyT7BP8WLGeisd3ZmXsAEqgHTFANZ1GWcO5hnW_-nvKNE3HANFsht1e6N-eG9may67DDxxLXQT5PuXjbe5wU5EvdZBC03Ww",
+      "htmlUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzkzYmFlZGVjNTgzNzRjOWM4ZjcxNWRlNDdjZmRkNWY4EgsSBxCl_fCrhgUYAZIBJAoKcHJvamVjdF9pZBIWQhQxODI1NTQ5MDEyMDI2MDY1NzIwMA&filename=&opi=89354086"
+    },
+    {
+      "title": "Interaction Dashboard",
+      "id": "0d743e33e37446c7a07ae9c2af39bdf1",
+      "imageFile": "interaction-dashboard.png",
+      "codeFile": "interaction-dashboard.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/ADBb0ui4STbRAwlSIHUYMVxkBqzmlsOsift2pcxcjtP4SC537X6Q_qvqwg4oyegBGRcy1wP9EigiddOGy6mI0F5ytR2EtHegoHy5yC3oQe0iuvZNnuv8oCsxNc8aXsySkDaXWvd758h6_UKV8GdU4RidNxKiPgEhXWtaigBbRbsq8cVZGI8kgfm_wY187LqEi3bjtCQBd2jUsvTSYcVCvINWauQvkIYg4Ues7bERwmZag-ScoHe8Ot_sQJ4QUMxD",
+      "htmlUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sX2RhNjQyODc5YWIwYTQ2OWM5MjY5OTBmOGZiNDA1ZWM5EgsSBxCl_fCrhgUYAZIBJAoKcHJvamVjdF9pZBIWQhQxODI1NTQ5MDEyMDI2MDY1NzIwMA&filename=&opi=89354086"
+    },
+    {
+      "title": "Profile & Settings",
+      "id": "1cad92fa45ff44aaa86ef676d45a907d",
+      "imageFile": "profile-settings.png",
+      "codeFile": "profile-settings.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/ADBb0uhChQLPedyYxBk9YsgFezGnmkF0fo8W9ajh_C-AFJU-JjU4xDulr8TKCh_G9FHoID-HmKmd2rttggiEjlUR5t_8l7-y6efH8QBSb7up8LCGMOr29KjweCGaiodl0t_2gijy6KULvfD15DT0hbJM6vFbxDRq83_m-cT3mJ1Olpk42GDXI_pUn5VoZct58pRGSAI8pRdFqXoLFmb3JX3ajJ_6aM8YBrCRg5RSw_e1rpa2rPqWWVVDwZ8Bkbsg",
+      "htmlUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzI3YTM5MzQwYmJhMTQxOTVhODRhMjAyMjRjNDY1YzhmEgsSBxCl_fCrhgUYAZIBJAoKcHJvamVjdF9pZBIWQhQxODI1NTQ5MDEyMDI2MDY1NzIwMA&filename=&opi=89354086"
+    },
+    {
+      "title": "Error & Edge States",
+      "id": "87031e00d8614d2bbaf3da7f71b3096c",
+      "imageFile": "error-edge-states.png",
+      "codeFile": "error-edge-states.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/ADBb0uidAwDfCG8hQCaxG8-vf13N6RFdhLYNVKx2mEG8-tt7yyVgeQJi1srgmAG55ixdtzz5EzGoSvYrTJClVST4MUZnXaisr6C1S_9S9JEwfzGf0D5yj11zDc_o9epBDo8O0b7PQEcgI-HSjiSwqa7oy8J5ojPCb9mje7mIZP24nPXJm_ge95sL2emyK0nVg4yS69VKIJ5Ej4KJkZjlIE3p7fKOokrS25S30Y5Q9EG4gZb2Bw9D3Hcw5GC6Vtbx",
+      "htmlUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzEyMzVmNTVlMTI2NTQ0MGI5MjlkNmJkZGRlY2Q3Y2YxEgsSBxCl_fCrhgUYAZIBJAoKcHJvamVjdF9pZBIWQhQxODI1NTQ5MDEyMDI2MDY1NzIwMA&filename=&opi=89354086"
+    }
+  ],
+  "designSystem": {
+    "title": "Design System",
+    "id": "asset-stub-assets-e4d530d3627f409cb9973e0d0b85580e-1774996521133",
+    "assetName": "assets/e4d530d3627f409cb9973e0d0b85580e",
+    "exportFiles": [
+      "design-system.md",
+      "design-system.json"
+    ],
+    "note": "No downloadable screenshot or HTML URL was exposed for the design-system instance."
+  }
+}

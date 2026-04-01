@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Profile &amp; Settings | Which Quote?</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Work+Sans:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-primary-fixed-variant": "#31617a",
+              "outline-variant": "#abb3b7",
+              "primary-fixed-dim": "#acdbf9",
+              "on-secondary-fixed-variant": "#595c5e",
+              "secondary-dim": "#515356",
+              "on-error": "#fff7f6",
+              "on-primary": "#f2f8ff",
+              "primary-dim": "#275771",
+              "tertiary-dim": "#46546b",
+              "on-primary-container": "#265770",
+              "surface": "#f8f9fa",
+              "on-tertiary-container": "#445269",
+              "on-secondary-fixed": "#3d4042",
+              "outline": "#737c7f",
+              "primary": "#34647d",
+              "on-tertiary": "#f8f8ff",
+              "surface-dim": "#d1dce0",
+              "on-tertiary-fixed": "#324056",
+              "on-primary-fixed": "#0c445d",
+              "surface-container-high": "#e3e9ec",
+              "on-secondary": "#f8f9fb",
+              "error-dim": "#4e0309",
+              "secondary-container": "#e1e2e5",
+              "tertiary-fixed-dim": "#c6d5f1",
+              "surface-container-low": "#f1f4f6",
+              "primary-fixed": "#c4e7ff",
+              "inverse-on-surface": "#9b9d9e",
+              "on-error-container": "#752121",
+              "primary-container": "#c4e7ff",
+              "on-surface-variant": "#586064",
+              "secondary-fixed-dim": "#d3d4d7",
+              "on-secondary-container": "#505254",
+              "surface-bright": "#f8f9fa",
+              "surface-container-lowest": "#ffffff",
+              "inverse-surface": "#0c0f10",
+              "tertiary": "#526077",
+              "surface-container": "#eaeff1",
+              "secondary": "#5d5f61",
+              "on-surface": "#2b3437",
+              "tertiary-container": "#d4e3ff",
+              "tertiary-fixed": "#d4e3ff",
+              "surface-tint": "#34647d",
+              "on-background": "#2b3437",
+              "inverse-primary": "#b1e0ff",
+              "error": "#9f403d",
+              "error-container": "#fe8983",
+              "secondary-fixed": "#e1e2e5",
+              "surface-container-highest": "#dbe4e7",
+              "surface-variant": "#dbe4e7",
+              "background": "#f8f9fa"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Work Sans"],
+              "label": ["Work Sans"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body {
+            font-family: 'Work Sans', sans-serif;
+            background-color: #f8f9fa;
+            color: #2b3437;
+        }
+        h1, h2, h3 {
+            font-family: 'Manrope', sans-serif;
+        }
+        .glass-header {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+        }
+    </script>
+</head>
+<body class="flex flex-col min-h-screen">
+
+    <!-- TopNavBar -->
+    <header class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm dark:shadow-none">
+        <div class="flex justify-between items-center px-8 py-4 max-w-full mx-auto">
+            <div class="flex items-center gap-8">
+                <span class="text-xl font-bold tracking-tight text-cyan-900 dark:text-cyan-100">Which Quote?</span>
+                <nav class="hidden md:flex gap-6 items-center">
+                    <a href="#" class="font-manrope text-sm font-medium tracking-tight text-slate-500 dark:text-slate-400 hover:text-cyan-600 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">Dashboard</a>
+                    <a href="#" class="font-manrope text-sm font-medium tracking-tight text-slate-500 dark:text-slate-400 hover:text-cyan-600 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">Discover</a>
+                    <a href="#" class="font-manrope text-sm font-medium tracking-tight text-slate-500 dark:text-slate-400 hover:text-cyan-600 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">About</a>
+                </nav>
+            </div>
+            <div class="flex items-center gap-4">
+                <button class="p-2 rounded-full hover:bg-slate-50/50 transition-colors active:scale-95 duration-200">
+                    <span class="material-symbols-outlined text-cyan-800 dark:text-cyan-400">notifications</span>
+                </button>
+                <div class="w-8 h-8 rounded-full overflow-hidden border border-cyan-800/10">
+                    <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=100&auto=format&fit=crop" alt="User profile and settings" data-alt="Close-up portrait of a professional man with a neutral expression in a bright, modern studio setting with soft lighting">
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow pt-24 pb-12 px-6 lg:px-12 max-w-7xl mx-auto w-full">
+        <!-- Header Section -->
+        <div class="mb-10">
+            <h1 class="text-4xl font-extrabold tracking-tight text-on-surface mb-2">Profile & Preferences</h1>
+            <p class="text-on-surface-variant font-body">Manage your identity, voice synthesis, and research history.</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <!-- Left Column: Settings Groups -->
+            <div class="lg:col-span-7 space-y-8">
+                
+                <!-- Section: User Identity -->
+                <section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
+                    <div class="flex items-center gap-4 mb-8">
+                        <div class="w-16 h-16 rounded-full bg-primary-container flex items-center justify-center text-on-primary-container">
+                            <span class="material-symbols-outlined text-3xl">face</span>
+                        </div>
+                        <div>
+                            <h2 class="text-xl font-bold text-on-surface">User Identity</h2>
+                            <p class="text-sm text-on-surface-variant">Voice-authenticated profile</p>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-6">
+                        <div class="p-4 bg-surface-container rounded-lg border-l-4 border-primary">
+                            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Detected Name</label>
+                            <p class="text-lg font-medium text-on-surface">Dr. Julian Thorne</p>
+                        </div>
+
+                        <div class="p-6 bg-surface-container-low rounded-lg">
+                            <h3 class="font-semibold mb-2">Voice Recognition Sample</h3>
+                            <p class="text-sm text-on-surface-variant mb-4">Last updated 2 days ago. To improve accuracy across different environments, provide a new sample.</p>
+                            <button class="flex items-center gap-2 bg-gradient-to-r from-primary to-primary-dim text-on-primary px-4 py-2 rounded-md font-medium text-sm hover:opacity-90 transition-opacity">
+                                <span class="material-symbols-outlined">mic</span>
+                                Re-record Sample
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section: TTS Preferences -->
+                <section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
+                    <div class="flex items-center gap-4 mb-8">
+                        <div class="w-12 h-12 rounded-full bg-tertiary-container flex items-center justify-center text-on-tertiary-container">
+                            <span class="material-symbols-outlined">settings_voice</span>
+                        </div>
+                        <h2 class="text-xl font-bold text-on-surface">Text-to-Speech</h2>
+                    </div>
+
+                    <div class="space-y-8">
+                        <div>
+                            <label class="block text-sm font-semibold text-on-surface-variant mb-4">Voice Profile</label>
+                            <div class="grid grid-cols-3 gap-3">
+                                <button class="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-primary bg-primary-container/10">
+                                    <span class="material-symbols-outlined text-primary">person_play</span>
+                                    <span class="text-xs font-medium">Natural</span>
+                                </button>
+                                <button class="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-transparent bg-surface-container hover:bg-surface-container-high transition-colors">
+                                    <span class="material-symbols-outlined text-on-surface-variant">school</span>
+                                    <span class="text-xs font-medium">Professional</span>
+                                </button>
+                                <button class="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-transparent bg-surface-container hover:bg-surface-container-high transition-colors">
+                                    <span class="material-symbols-outlined text-on-surface-variant">theater_comedy</span>
+                                    <span class="text-xs font-medium">Expressive</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="text-sm font-semibold text-on-surface-variant">Speaking Rate</label>
+                                    <span class="text-xs font-mono text-primary">1.0x</span>
+                                </div>
+                                <input type="range" class="w-full h-1 bg-surface-container-high rounded-full appearance-none accent-primary cursor-pointer">
+                                <div class="flex justify-between mt-2 text-[10px] text-outline uppercase tracking-tighter">
+                                    <span>Slow</span>
+                                    <span>Fast</span>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="text-sm font-semibold text-on-surface-variant">Pitch</label>
+                                    <span class="text-xs font-mono text-primary">Neutral</span>
+                                </div>
+                                <input type="range" class="w-full h-1 bg-surface-container-high rounded-full appearance-none accent-primary cursor-pointer">
+                                <div class="flex justify-between mt-2 text-[10px] text-outline uppercase tracking-tighter">
+                                    <span>Low</span>
+                                    <span>High</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Right Column: History & About -->
+            <div class="lg:col-span-5 space-y-8">
+                
+                <!-- Section: Search History -->
+                <section class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+                    <div class="p-6 bg-surface-container-high/50 flex justify-between items-center">
+                        <h2 class="text-lg font-bold text-on-surface">Recent Research</h2>
+                        <span class="material-symbols-outlined text-outline text-sm">history</span>
+                    </div>
+                    <div class="divide-y divide-surface-container">
+                        <!-- History Item 1 -->
+                        <div class="p-4 hover:bg-surface-bright transition-colors cursor-pointer group">
+                            <div class="flex justify-between items-start mb-1">
+                                <span class="text-sm font-medium text-on-surface group-hover:text-primary transition-colors">"The cost of liberty is..."</span>
+                                <span class="text-[10px] text-outline">2h ago</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <span class="px-2 py-0.5 bg-tertiary-container text-on-tertiary-container text-[10px] rounded-full uppercase font-semibold">Politics</span>
+                                <span class="px-2 py-0.5 bg-secondary-container text-on-secondary-container text-[10px] rounded-full uppercase font-semibold">Saved</span>
+                            </div>
+                        </div>
+                        <!-- History Item 2 -->
+                        <div class="p-4 hover:bg-surface-bright transition-colors cursor-pointer group">
+                            <div class="flex justify-between items-start mb-1">
+                                <span class="text-sm font-medium text-on-surface group-hover:text-primary transition-colors">"Neural networks and linguistics..."</span>
+                                <span class="text-[10px] text-outline">Yesterday</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <span class="px-2 py-0.5 bg-tertiary-container text-on-tertiary-container text-[10px] rounded-full uppercase font-semibold">Technology</span>
+                            </div>
+                        </div>
+                        <!-- History Item 3 -->
+                        <div class="p-4 hover:bg-surface-bright transition-colors cursor-pointer group">
+                            <div class="flex justify-between items-start mb-1">
+                                <span class="text-sm font-medium text-on-surface group-hover:text-primary transition-colors">"Marcus Aurelius Meditations"</span>
+                                <span class="text-[10px] text-outline">3 days ago</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <span class="px-2 py-0.5 bg-tertiary-container text-on-tertiary-container text-[10px] rounded-full uppercase font-semibold">Philosophy</span>
+                                <span class="px-2 py-0.5 bg-secondary-container text-on-secondary-container text-[10px] rounded-full uppercase font-semibold">Saved</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="w-full py-4 text-xs font-bold text-primary uppercase tracking-widest bg-surface-container-low hover:bg-surface-container transition-colors">
+                        View Full History
+                    </button>
+                </section>
+
+                <!-- Section: About Project -->
+                <section class="bg-primary text-on-primary rounded-xl p-8 shadow-lg relative overflow-hidden">
+                    <!-- Subtle pattern overlay simulated with gradient -->
+                    <div class="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-white via-transparent to-transparent"></div>
+                    
+                    <h2 class="text-xl font-bold mb-4 relative z-10">The Digital Curator</h2>
+                    <p class="text-sm leading-relaxed mb-6 text-on-primary/80 relative z-10">
+                        "Which Quote?" is an advanced Natural Language Processing engine built at NLP University. We utilize a massive Wikiquote graph database to find semantic connections between human thought across centuries.
+                    </p>
+                    
+                    <div class="space-y-4 relative z-10">
+                        <div class="flex items-start gap-3">
+                            <span class="material-symbols-outlined text-primary-fixed">account_tree</span>
+                            <div>
+                                <p class="text-xs font-bold uppercase tracking-tight text-primary-fixed">Graph Database</p>
+                                <p class="text-xs text-on-primary/70">4.2M nodes / 18M semantic links</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="material-symbols-outlined text-primary-fixed">psychology</span>
+                            <div>
+                                <p class="text-xs font-bold uppercase tracking-tight text-primary-fixed">NLP Engine</p>
+                                <p class="text-xs text-on-primary/70">Curator-v4 Transformer Model</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-8 pt-6 border-t border-white/10 flex justify-between items-center relative z-10">
+                        <span class="text-[10px] uppercase font-bold tracking-widest text-primary-fixed">Version 2.4.0-Stable</span>
+                        <a href="#" class="text-[10px] font-bold underline decoration-primary-fixed underline-offset-4 hover:text-white transition-colors">Technical Docs</a>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full py-12 mt-auto bg-slate-50 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800">
+        <div class="flex flex-col md:flex-row justify-between items-center px-12 gap-8">
+            <p class="font-work-sans text-xs uppercase tracking-widest text-slate-400">© 2024 Which Quote? | NLP University Project</p>
+            <div class="flex gap-8">
+                <a href="#" class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors">Documentation</a>
+                <a href="#" class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors">Privacy Policy</a>
+                <a href="#" class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors">University Credits</a>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html></style></head><body></body></html>

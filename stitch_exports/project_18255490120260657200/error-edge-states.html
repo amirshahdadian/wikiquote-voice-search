@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&amp;family=Work+Sans:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-primary-fixed-variant": "#31617a",
+              "outline-variant": "#abb3b7",
+              "primary-fixed-dim": "#acdbf9",
+              "on-secondary-fixed-variant": "#595c5e",
+              "secondary-dim": "#515356",
+              "on-tertiary-fixed-variant": "#4e5c73",
+              "on-error": "#fff7f6",
+              "on-primary": "#f2f8ff",
+              "primary-dim": "#275771",
+              "tertiary-dim": "#46546b",
+              "on-primary-container": "#265770",
+              "surface": "#f8f9fa",
+              "on-tertiary-container": "#445269",
+              "on-secondary-fixed": "#3d4042",
+              "outline": "#737c7f",
+              "primary": "#34647d",
+              "on-tertiary": "#f8f8ff",
+              "surface-dim": "#d1dce0",
+              "on-tertiary-fixed": "#324056",
+              "on-primary-fixed": "#0c445d",
+              "surface-container-high": "#e3e9ec",
+              "on-secondary": "#f8f9fb",
+              "error-dim": "#4e0309",
+              "secondary-container": "#e1e2e5",
+              "tertiary-fixed-dim": "#c6d5f1",
+              "surface-container-low": "#f1f4f6",
+              "primary-fixed": "#c4e7ff",
+              "inverse-on-surface": "#9b9d9e",
+              "on-error-container": "#752121",
+              "primary-container": "#c4e7ff",
+              "on-surface-variant": "#586064",
+              "secondary-fixed-dim": "#d3d4d7",
+              "on-secondary-container": "#505254",
+              "surface-bright": "#f8f9fa",
+              "surface-container-lowest": "#ffffff",
+              "inverse-surface": "#0c0f10",
+              "tertiary": "#526077",
+              "surface-container": "#eaeff1",
+              "secondary": "#5d5f61",
+              "on-surface": "#2b3437",
+              "tertiary-container": "#d4e3ff",
+              "tertiary-fixed": "#d4e3ff",
+              "surface-tint": "#34647d",
+              "on-background": "#2b3437",
+              "inverse-primary": "#b1e0ff",
+              "error": "#9f403d",
+              "error-container": "#fe8983",
+              "secondary-fixed": "#e1e2e5",
+              "surface-container-highest": "#dbe4e7",
+              "surface-variant": "#dbe4e7",
+              "background": "#f8f9fa"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Work Sans"],
+              "label": ["Work Sans"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      .glass-nav {
+        background: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(12px);
+      }
+      .academic-gradient {
+        background: linear-gradient(135deg, #34647d 0%, #275771 100%);
+      }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface min-h-screen flex flex-col">
+<!-- TopAppBar -->
+<nav class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm dark:shadow-none">
+<div class="flex justify-between items-center px-8 py-4 max-w-full mx-auto">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold tracking-tight text-cyan-900 dark:text-cyan-100 font-headline">Which Quote?</span>
+<div class="hidden md:flex gap-6">
+<a class="font-manrope text-sm font-medium tracking-tight text-cyan-700 dark:text-cyan-300 border-b-2 border-cyan-700 pb-1" href="#">Dashboard</a>
+<a class="font-manrope text-sm font-medium tracking-tight text-slate-500 dark:text-slate-400 hover:text-cyan-600 transition-colors" href="#">Discover</a>
+<a class="font-manrope text-sm font-medium tracking-tight text-slate-500 dark:text-slate-400 hover:text-cyan-600 transition-colors" href="#">About</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 text-cyan-800 dark:text-cyan-400 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 rounded-full transition-colors active:scale-95 duration-200">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden bg-surface-container">
+<img alt="User profile and settings" class="w-full h-full object-cover" data-alt="professional portrait of a scholar in a modern library setting with soft natural light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCQRp6LpcQ2R9kQlLgxv4ITU8MtovkRI18FPidDCemoX1BJ8SKm3d-iTdlVr23dntAxd6eXmLz8ze-RG-I0Gpgq9S8CSDkg6Vxpdm3AKDWqMOFX5p_4FCY7i75iWM_28DW6hVDC-w2LdE1kZaeeZp2ALDd6c5BuTLin8Xy0y4kvxjkgGBHXX77RtG01qVTqZ6Ike-oma-By1lvLhCOzYPbMtvK5ASVFprXmdJ6VZlfRJTXfBJArvvHmfIBg0dFThNfhv0vD6oQgSI6b"/>
+</div>
+</div>
+</div>
+</nav>
+<main class="pt-24 px-8 pb-12 max-w-7xl mx-auto w-full">
+<!-- Microphone Permission Banner (System State) -->
+<div class="mb-8 bg-error-container/20 rounded-xl p-4 flex items-center gap-4 animate-in fade-in slide-in-from-top-4">
+<div class="bg-error-container p-2 rounded-lg text-on-error-container">
+<span class="material-symbols-outlined" data-icon="mic_off">mic_off</span>
+</div>
+<div class="flex-1">
+<h3 class="font-headline font-bold text-on-surface">Microphone Permission Denied</h3>
+<p class="text-sm text-on-surface-variant">We need access to your microphone to transcribe quotes. Please enable permissions in your browser settings and refresh the page.</p>
+</div>
+<button class="px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary hover:bg-primary/5 rounded-lg transition-colors">
+                How to enable
+            </button>
+</div>
+<header class="mb-12">
+<h1 class="font-headline text-4xl font-extrabold tracking-tight text-on-surface-variant mb-2">Analysis Workspace</h1>
+<p class="text-on-surface-variant/70 body-lg">Reviewing recent NLP transcription errors and attribution edge cases.</p>
+</header>
+<!-- Bento Grid Layout for States -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-6">
+<!-- Speaker Not Recognized State -->
+<div class="md:col-span-7 bg-surface-container-lowest rounded-xl p-8 shadow-sm transition-all hover:bg-surface-bright group">
+<div class="flex justify-between items-start mb-6">
+<div>
+<span class="label-md uppercase tracking-widest text-primary mb-2 block">NLP Attribution Error</span>
+<h2 class="headline-md font-bold text-on-surface">Speaker Not Recognized</h2>
+</div>
+<span class="material-symbols-outlined text-outline-variant" data-icon="person_search">person_search</span>
+</div>
+<div class="bg-surface-container-low rounded-lg p-6 mb-8">
+<p class="body-lg italic text-on-surface-variant/80">"The true sign of intelligence is not knowledge but imagination."</p>
+</div>
+<p class="text-sm text-on-surface-variant mb-6">Our system detected a new voice profile that doesn't match our scholarly database. Would you like to associate this voice with a researcher or proceed anonymously?</p>
+<div class="flex gap-4">
+<button class="academic-gradient px-6 py-3 rounded-md text-on-primary font-medium flex items-center gap-2 active:scale-95 duration-200">
+<span class="material-symbols-outlined text-sm" data-icon="how_to_reg">how_to_reg</span>
+                        Register Speaker
+                    </button>
+<button class="bg-secondary-container px-6 py-3 rounded-md text-on-secondary-container font-medium hover:bg-surface-container-high transition-colors active:scale-95 duration-200">
+                        Continue as Guest
+                    </button>
+</div>
+</div>
+<!-- Low ASR Confidence State -->
+<div class="md:col-span-5 bg-surface-container-lowest rounded-xl p-8 shadow-sm transition-all hover:bg-surface-bright border-b-2 border-transparent hover:border-primary/10">
+<div class="flex justify-between items-center mb-6">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-error" data-icon="warning" style="font-variation-settings: 'FILL' 1;">warning</span>
+<span class="label-md font-semibold text-error uppercase tracking-tighter">Low Confidence (42%)</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant" data-icon="graphic_eq">graphic_eq</span>
+</div>
+<h3 class="font-headline font-bold text-lg mb-4">Transcription Clarification</h3>
+<div class="space-y-4">
+<div class="p-4 rounded-lg bg-surface-container">
+<p class="text-xs text-on-surface-variant uppercase mb-1">Original Capture:</p>
+<p class="text-on-surface">"I think therefore I ham..."</p>
+</div>
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-sm" data-icon="magic_button">magic_button</span>
+<p class="text-sm font-medium text-primary">Did you mean?</p>
+</div>
+<button class="w-full text-left p-4 rounded-lg border border-primary/20 hover:bg-primary/5 transition-colors group">
+<p class="text-on-surface font-medium">"I think, therefore I am."</p>
+<p class="text-xs text-on-surface-variant">René Descartes (1637)</p>
+</button>
+</div>
+</div>
+<!-- Multiple Possible Matches State -->
+<div class="md:col-span-8 bg-surface-container-lowest rounded-xl p-8 shadow-sm transition-all hover:bg-surface-bright">
+<div class="flex justify-between items-center mb-8">
+<h2 class="headline-md font-bold text-on-surface">Multiple Possible Matches</h2>
+<span class="px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full text-xs font-bold uppercase tracking-widest">Disambiguation Required</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="p-5 rounded-xl bg-surface-container-low hover:bg-surface-container transition-all cursor-pointer border-l-4 border-primary">
+<div class="flex justify-between items-start mb-2">
+<span class="material-symbols-outlined text-primary" data-icon="menu_book">menu_book</span>
+<span class="text-xs font-bold text-primary">98% Match</span>
+</div>
+<p class="text-sm font-medium mb-1">"To be or not to be..."</p>
+<p class="text-xs text-on-surface-variant">William Shakespeare, <span class="italic">Hamlet</span></p>
+</div>
+<div class="p-5 rounded-xl bg-surface-container-low hover:bg-surface-container transition-all cursor-pointer border-l-4 border-outline-variant/30">
+<div class="flex justify-between items-start mb-2">
+<span class="material-symbols-outlined text-outline-variant" data-icon="history_edu">history_edu</span>
+<span class="text-xs font-medium text-on-surface-variant">Alternative Interpretation</span>
+</div>
+<p class="text-sm font-medium mb-1">"Two bee or knot two bee..."</p>
+<p class="text-xs text-on-surface-variant">Modern Satirical Reference</p>
+</div>
+</div>
+<div class="mt-8 pt-8 border-t border-outline-variant/10 flex justify-end">
+<button class="text-primary text-sm font-bold flex items-center gap-2 hover:underline">
+                        View 4 other variants
+                        <span class="material-symbols-outlined text-sm" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- No Quote Found State -->
+<div class="md:col-span-4 bg-surface-container-low rounded-xl p-8 flex flex-col items-center text-center justify-center border-2 border-dashed border-outline-variant/20">
+<div class="w-16 h-16 bg-surface-container-highest rounded-full flex items-center justify-center mb-6">
+<span class="material-symbols-outlined text-3xl text-outline" data-icon="search_off">search_off</span>
+</div>
+<h3 class="font-headline font-bold text-xl mb-3">No Direct Match Found</h3>
+<p class="text-sm text-on-surface-variant mb-6 px-4">We couldn't find an exact citation for this phrase in our current NLP university archive.</p>
+<div class="space-y-3 w-full">
+<button class="w-full py-2 bg-white text-on-surface-variant text-xs font-semibold rounded-lg shadow-sm border border-outline-variant/10 hover:bg-surface-bright transition-colors">
+                        Expand Search Parameters
+                    </button>
+<button class="w-full py-2 bg-white text-on-surface-variant text-xs font-semibold rounded-lg shadow-sm border border-outline-variant/10 hover:bg-surface-bright transition-colors">
+                        Check Partial Matches
+                    </button>
+</div>
+</div>
+</div>
+<!-- System Stats / Footer of Workspace -->
+<section class="mt-12 grid grid-cols-1 md:grid-cols-4 gap-4">
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm">
+<p class="label-md text-on-surface-variant mb-1">Error Rate</p>
+<p class="text-2xl font-bold text-primary">2.4%</p>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm">
+<p class="label-md text-on-surface-variant mb-1">Avg Confidence</p>
+<p class="text-2xl font-bold text-on-surface">94.1%</p>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm">
+<p class="label-md text-on-surface-variant mb-1">Unresolved Clips</p>
+<p class="text-2xl font-bold text-on-surface">12</p>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm">
+<p class="label-md text-on-surface-variant mb-1">Server Status</p>
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-green-500"></div>
+<p class="text-2xl font-bold text-on-surface">Optimal</p>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 mt-auto bg-slate-50 dark:bg-slate-950">
+<div class="flex flex-col md:flex-row justify-between items-center px-12 border-t border-slate-100 dark:border-slate-800 pt-8">
+<span class="font-work-sans text-xs uppercase tracking-widest text-slate-400 mb-6 md:mb-0">© 2024 Which Quote? | NLP University Project</span>
+<div class="flex gap-8">
+<a class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors" href="#">Documentation</a>
+<a class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors" href="#">Privacy Policy</a>
+<a class="font-work-sans text-xs uppercase tracking-widest text-slate-400 hover:text-cyan-500 transition-colors" href="#">University Credits</a>
+</div>
+</div>
+</footer>
+</body></html>

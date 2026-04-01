@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 from ..config import Config
 
@@ -126,6 +126,15 @@ def initialize_database(db_path: Optional[Path] = None) -> Path:
                 speaking_rate REAL DEFAULT 1.0,
                 energy_scale REAL DEFAULT 1.0,
                 style TEXT DEFAULT 'neutral',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """,
+        "user_profiles": """
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                group_identifier TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -260,6 +269,134 @@ def create_user(user_id: str, db_path: Optional[Path] = None) -> bool:
         return False
 
 
+def save_user_profile(
+    user_id: str,
+    display_name: str,
+    group_identifier: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> bool:
+    """Create or update a lightweight user profile record."""
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO user_profiles (user_id, display_name, group_identifier, created_at, updated_at)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(user_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                group_identifier = excluded.group_identifier,
+                updated_at = datetime('now')
+            """,
+            (user_id, display_name, group_identifier),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error saving user profile: {e}")
+        return False
+
+
+def get_user_profile(user_id: str, db_path: Optional[Path] = None) -> Optional[Dict]:
+    """Return the stored user profile for the supplied user id."""
+    try:
+        conn = get_connection(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT user_id, display_name, group_identifier, created_at, updated_at
+            FROM user_profiles
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"Error getting user profile: {e}")
+        return None
+
+
+def list_user_profiles(db_path: Optional[Path] = None) -> List[Dict]:
+    """Return all saved user profiles ordered by display name."""
+    try:
+        conn = get_connection(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT user_id, display_name, group_identifier, created_at, updated_at
+            FROM user_profiles
+            ORDER BY lower(display_name)
+            """
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"Error listing user profiles: {e}")
+        return []
+
+
+def delete_user_profile(user_id: str, db_path: Optional[Path] = None) -> bool:
+    """Delete a user profile record by id."""
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error deleting user profile: {e}")
+        return False
+
+
+def delete_tts_preferences(user_id: str, db_path: Optional[Path] = None) -> bool:
+    """Delete saved TTS preferences for a user."""
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_tts_preferences WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error deleting TTS preferences: {e}")
+        return False
+
+
+def delete_user_record(user_id: str, db_path: Optional[Path] = None) -> bool:
+    """Delete the legacy user row by username."""
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM users WHERE username = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error deleting user record: {e}")
+        return False
+
+
+def list_tts_preference_users(db_path: Optional[Path] = None) -> List[str]:
+    """Return user ids that currently have TTS preference records."""
+    try:
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM user_tts_preferences ORDER BY lower(user_id)")
+        rows = cursor.fetchall()
+        conn.close()
+        return [row[0] for row in rows]
+    except Exception as e:
+        print(f"Error listing TTS preference users: {e}")
+        return []
+
+
 def user_exists(user_id: str, db_path: Optional[Path] = None) -> bool:
     """
     Check if a user exists
@@ -318,12 +455,19 @@ def list_all_users(db_path: Optional[Path] = None) -> list:
 
 
 __all__ = [
-    "DEFAULT_DB_PATH", 
-    "get_connection", 
+    "DEFAULT_DB_PATH",
+    "get_connection",
     "initialize_database",
     "save_tts_preferences",
     "get_tts_preferences",
     "create_user",
+    "save_user_profile",
+    "get_user_profile",
+    "list_user_profiles",
+    "delete_user_profile",
+    "delete_tts_preferences",
+    "delete_user_record",
+    "list_tts_preference_users",
     "user_exists",
-    "list_all_users"
+    "list_all_users",
 ]

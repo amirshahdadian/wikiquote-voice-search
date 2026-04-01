@@ -11,6 +11,14 @@ logging.basicConfig(level=getattr(logging, Config.LOG_LEVEL),
 logger = logging.getLogger(__name__)
 
 class QuoteSearchService:
+    PAGE_TYPE_MULTIPLIERS = {
+        "person": 1.15,
+        "literary_work": 1.05,
+        "theme": 0.55,
+        "film": 0.45,
+        "tv_show": 0.4,
+    }
+
     def __init__(self, uri: str, username: str, password: str):
         """Initialize the search service with Neo4j connection."""
         self.uri = uri
@@ -69,6 +77,19 @@ class QuoteSearchService:
             fallback_driver.verify_connectivity()
             self.uri = fallback_uri
             return fallback_driver
+
+    def _page_type_multiplier_case(self, property_name: str = "quote.page_type") -> str:
+        """Return a Cypher CASE expression that prefers high-precision page types."""
+        return f"""
+        CASE coalesce({property_name}, 'unknown')
+            WHEN 'person' THEN {self.PAGE_TYPE_MULTIPLIERS['person']}
+            WHEN 'literary_work' THEN {self.PAGE_TYPE_MULTIPLIERS['literary_work']}
+            WHEN 'theme' THEN {self.PAGE_TYPE_MULTIPLIERS['theme']}
+            WHEN 'film' THEN {self.PAGE_TYPE_MULTIPLIERS['film']}
+            WHEN 'tv_show' THEN {self.PAGE_TYPE_MULTIPLIERS['tv_show']}
+            ELSE 0.8
+        END
+        """
     
     def close(self):
         """Close the Neo4j connection."""
@@ -184,8 +205,9 @@ class QuoteSearchService:
         # Known topic pages that aren't real authors
         topic_pages = ['Art', 'Poets', 'Poetry', 'Literature', 'Philosophy', 'Science', 
                        'Love', 'Life', 'Death', 'Time', 'Nature', 'Music', 'War', 'Peace']
+        page_type_multiplier_case = self._page_type_multiplier_case()
         
-        cypher_query = """
+        cypher_query = f"""
         MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
         MATCH (quote)-[:APPEARS_IN]->(source:Source)
         WHERE toLower(quote.text) CONTAINS toLower($search_text)
@@ -218,6 +240,7 @@ class QuoteSearchService:
                  WHEN author_name IN $topic_pages THEN 0.5
                  ELSE 1.0
              END AS author_multiplier,
+             {page_type_multiplier_case} AS page_type_multiplier,
              CASE
                  WHEN quote_lower STARTS WITH query_lower THEN 'beginning'
                  WHEN quote_lower ENDS WITH query_lower THEN 'end'
@@ -228,7 +251,7 @@ class QuoteSearchService:
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               ((position_score + length_bonus) * author_multiplier) / 130.0 AS relevance_score,
+               ((position_score + length_bonus) * author_multiplier * page_type_multiplier) / 130.0 AS relevance_score,
                quote_length,
                match_position,
                'partial_match' AS search_type
@@ -258,8 +281,9 @@ class QuoteSearchService:
         """Full-text search using Neo4j index - prefers concise, quotable quotes."""
         # Prepare search query for full-text index
         search_query = self._prepare_fulltext_query(query)
+        page_type_multiplier_case = self._page_type_multiplier_case()
         
-        cypher_query = """
+        cypher_query = f"""
         CALL db.index.fulltext.queryNodes('quote_fulltext_index', $search_query)
         YIELD node AS quote, score
         
@@ -277,7 +301,7 @@ class QuoteSearchService:
                  WHEN quote_length >= 50 AND quote_length <= 200 THEN 1.5
                  WHEN quote_length > 200 AND quote_length <= 300 THEN 1.2
                  ELSE 1.0
-             END AS adjusted_score
+             END * {page_type_multiplier_case} AS adjusted_score
         
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
@@ -303,6 +327,7 @@ class QuoteSearchService:
         keywords = self._extract_keywords(query)
         if not keywords:
             return []
+        page_type_multiplier_case = self._page_type_multiplier_case()
         
         # Create CONTAINS conditions for each keyword
         conditions = []
@@ -322,7 +347,7 @@ class QuoteSearchService:
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               0.7 AS relevance_score,
+               0.7 * {page_type_multiplier_case} AS relevance_score,
                'keyword' AS search_type
         
         ORDER BY size(quote.text) ASC
@@ -339,8 +364,9 @@ class QuoteSearchService:
     
     def _fuzzy_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
         """Fuzzy search using similarity matching."""
+        page_type_multiplier_case = self._page_type_multiplier_case()
         
-        cypher_query = """
+        cypher_query = f"""
         MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
         MATCH (quote)-[:APPEARS_IN]->(source:Source)
         
@@ -352,7 +378,7 @@ class QuoteSearchService:
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               toFloat(size(common_words)) / size(split($search_query, ' ')) AS relevance_score,
+               (toFloat(size(common_words)) / size(split($search_query, ' '))) * {page_type_multiplier_case} AS relevance_score,
                'fuzzy' AS search_type
         
         ORDER BY relevance_score DESC
@@ -369,10 +395,11 @@ class QuoteSearchService:
     
     def search_by_author(self, author_query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Enhanced author search - prioritizes exact matches over partial matches."""
+        page_type_multiplier_case = self._page_type_multiplier_case()
         
         # Prioritize authors where the query matches the START of a word in their name
         # e.g., "einstein" should match "Albert Einstein" but not "Bret Weinstein"
-        cypher_query = """
+        cypher_query = f"""
         MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
         MATCH (quote)-[:APPEARS_IN]->(source:Source)
         WHERE toLower(author.name) CONTAINS toLower($author_query)
@@ -399,12 +426,15 @@ class QuoteSearchService:
                  ELSE 10
              END AS match_score
         
+        WITH quote, author, source, match_score,
+             match_score * {page_type_multiplier_case} AS adjusted_score
+
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               match_score AS relevance_score
+               adjusted_score AS relevance_score
         
-        ORDER BY match_score DESC, size(author.name) ASC, quote.text
+        ORDER BY adjusted_score DESC, size(author.name) ASC, quote.text
         LIMIT $limit
         """
         
@@ -425,8 +455,9 @@ class QuoteSearchService:
     
     def _fuzzy_author_search(self, author_query: str, limit: int) -> List[Dict[str, Any]]:
         """Fuzzy author search - finds authors even with typos."""
+        page_type_multiplier_case = self._page_type_multiplier_case()
         # Search for authors where most characters match
-        cypher_query = """
+        cypher_query = f"""
         MATCH (author:Author)
         WHERE size(author.name) > 3
         
@@ -451,7 +482,7 @@ class QuoteSearchService:
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               0.8 AS relevance_score
+               0.8 * {page_type_multiplier_case} AS relevance_score
         
         ORDER BY size(author.name), quote.text
         LIMIT $limit
@@ -469,6 +500,7 @@ class QuoteSearchService:
         """Search quotes by theme or topic."""
         # Define theme-related keywords
         theme_keywords = self._get_theme_keywords(theme.lower())
+        page_type_multiplier_case = self._page_type_multiplier_case()
         
         if not theme_keywords:
             # Fallback to direct search
@@ -477,19 +509,22 @@ class QuoteSearchService:
         # Create search query with theme keywords
         search_terms = " OR ".join(theme_keywords)
         
-        cypher_query = """
+        cypher_query = f"""
         CALL db.index.fulltext.queryNodes('quote_fulltext_index', $search_terms)
         YIELD node AS quote, score
         
         MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote)
         MATCH (quote)-[:APPEARS_IN]->(source:Source)
         
+        WITH quote, author, source, score,
+             score * {page_type_multiplier_case} AS adjusted_score
+
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               score AS relevance_score
+               adjusted_score AS relevance_score
         
-        ORDER BY score DESC
+        ORDER BY adjusted_score DESC
         LIMIT $limit
         """
         
