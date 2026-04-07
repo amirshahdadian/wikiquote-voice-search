@@ -377,7 +377,8 @@ class MWParserQuoteExtractor:
         """Infer whether the page is primarily about a television work."""
         if re.search(r'(?:^|/|\()season\s+\w+', title, re.IGNORECASE):
             return True
-        if re.search(r'\((?:tv|television)\s+series\)', title, re.IGNORECASE):
+        # Match "(TV series)", "(television series)", "(1981 TV series)", etc.
+        if re.search(r'\([^)]*\b(?:tv|television)\s+series\b[^)]*\)', title, re.IGNORECASE):
             return True
         if re.search(
             r'\bis an?\s+(?:[a-z-]+\s+){0,4}(?:television series|tv series|television show|sitcom|soap opera|anime series|web series)\b',
@@ -391,7 +392,8 @@ class MWParserQuoteExtractor:
 
     def _looks_like_film_page(self, title: str, intro: str, wikitext: str) -> bool:
         """Infer whether the page is primarily about a film or movie."""
-        if re.search(r'\((?:film|movie)\)', title, re.IGNORECASE):
+        # Match "(film)", "(movie)", "(2004 film)", "(1942 American film)", etc.
+        if re.search(r'\([^)]*\b(?:film|movie)\b[^)]*\)', title, re.IGNORECASE):
             return True
         if re.search(r'\bis an?\s+(?:[a-z-]+\s+){0,4}(?:film|movie|motion picture)\b', intro, re.IGNORECASE):
             return True
