@@ -769,10 +769,21 @@ class MWParserQuoteExtractor:
         if self._looks_like_disambiguation_page(intro, wikitext):
             return PageMetadata(title=title, page_type="list_page", default_author=title, default_source=title)
 
-        if self._looks_like_compilation_page(title, intro, wikitext):
-            return PageMetadata(title=title, page_type="list_page", default_author=title, default_source=title)
-
-        if re.search(r'(?:^|/|\()season\s+\w+', title, re.IGNORECASE):
+        # Title-based film/TV signals are unambiguous and must be checked
+        # BEFORE the person heuristic.  Film pages whose intros mention actor
+        # roles or two years (release + another date) can fire _looks_like_person_page
+        # even though the title clearly identifies them as films/TV shows.
+        if re.search(r'\([^)]*\b(?:film|movie)\b[^)]*\)', title, re.IGNORECASE):
+            return PageMetadata(
+                title=title,
+                page_type="film",
+                default_author=title,
+                default_source=title,
+                inferred_author=inferred_author,
+                inferred_work=title,
+            )
+        if re.search(r'(?:^|/|\()season\s+\w+', title, re.IGNORECASE) or \
+           re.search(r'\([^)]*\b(?:tv|television)\s+series\b[^)]*\)', title, re.IGNORECASE):
             return PageMetadata(
                 title=title,
                 page_type="tv_show",
@@ -781,6 +792,9 @@ class MWParserQuoteExtractor:
                 inferred_author=inferred_author,
                 inferred_work=title,
             )
+
+        if self._looks_like_compilation_page(title, intro, wikitext):
+            return PageMetadata(title=title, page_type="list_page", default_author=title, default_source=title)
 
         # Person check MUST precede literary_work: person pages about prolific
         # authors (Bertrand Russell, Winston Churchill) often mention their
