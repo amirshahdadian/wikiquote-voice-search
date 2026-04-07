@@ -485,6 +485,13 @@ class MWParserQuoteExtractor:
         if quote.page_type == "person" and quote.source and quote.author:
             if self._canonicalize_text(quote.source) == self._canonicalize_text(quote.author):
                 quote.source = None
+        # On literary_work pages, when author-inference failed the page title
+        # was used as the default_author (e.g. author="Human, All Too Human").
+        # The title is already captured in page_title/source, so clear it here
+        # rather than creating a spurious Author node with the work's name.
+        if quote.page_type == "literary_work" and quote.author and quote.page_title:
+            if self._canonicalize_text(quote.author) == self._canonicalize_text(quote.page_title):
+                quote.author = ""
         if self._looks_like_decade_bucket(quote.source):
             quote.source_locator = quote.source_locator or quote.source
             quote.source = None
@@ -779,16 +786,11 @@ class MWParserQuoteExtractor:
         if is_person_page:
             return PageMetadata(title=title, page_type="person", default_author=title, default_source=None)
 
-        if self._looks_like_literary_work_page(intro, wikitext):
-            return PageMetadata(
-                title=title,
-                page_type="literary_work",
-                default_author=inferred_author or title,
-                default_source=title,
-                inferred_author=inferred_author,
-                inferred_work=title,
-            )
-
+        # TV/film checks MUST precede literary_work: many film intros say
+        # "based on the 1973 novel" or "is a romantic drama" which triggers
+        # the literary_work heuristic before the film heuristic is reached,
+        # causing films to be extracted at the 150-quote person cap instead
+        # of the correct 25-quote film cap.
         if self._looks_like_tv_page(title, intro, wikitext):
             return PageMetadata(
                 title=title,
@@ -804,6 +806,16 @@ class MWParserQuoteExtractor:
                 title=title,
                 page_type="film",
                 default_author=title,
+                default_source=title,
+                inferred_author=inferred_author,
+                inferred_work=title,
+            )
+
+        if self._looks_like_literary_work_page(intro, wikitext):
+            return PageMetadata(
+                title=title,
+                page_type="literary_work",
+                default_author=inferred_author or title,
                 default_source=title,
                 inferred_author=inferred_author,
                 inferred_work=title,
