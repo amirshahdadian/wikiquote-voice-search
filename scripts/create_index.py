@@ -40,22 +40,34 @@ def create_fulltext_index():
         logger.info("✅ Connected to Neo4j")
         
         with driver.session() as session:
-            # Create full-text index across quote text plus denormalized provenance fields.
-            logger.info("Creating full-text index on Quote searchable fields...")
-            
-            index_query = """
-            CREATE FULLTEXT INDEX quote_fulltext_index IF NOT EXISTS
-            FOR (q:Quote) ON EACH [q.text, q.canonical_text, q.primary_author, q.primary_source, q.primary_page]
-            """
-            
-            try:
-                session.run(index_query)
-                logger.info("✅ Full-text index 'quote_fulltext_index' created (or already exists)")
-            except Exception as e:
-                if "already exists" in str(e).lower():
-                    logger.info("ℹ️ Index already exists")
-                else:
-                    raise
+            logger.info("Creating full-text indexes on quote searchable fields...")
+
+            fulltext_indexes = [
+                (
+                    "quote_primary_fulltext_index",
+                    """
+                    CREATE FULLTEXT INDEX quote_primary_fulltext_index IF NOT EXISTS
+                    FOR (q:PrimaryQuote) ON EACH [q.text, q.canonical_text, q.normalized_text, q.primary_author, q.primary_source, q.primary_page]
+                    """,
+                ),
+                (
+                    "quote_fulltext_index",
+                    """
+                    CREATE FULLTEXT INDEX quote_fulltext_index IF NOT EXISTS
+                    FOR (q:Quote) ON EACH [q.text, q.canonical_text, q.normalized_text, q.primary_author, q.primary_source, q.primary_page]
+                    """,
+                ),
+            ]
+
+            for index_name, index_query in fulltext_indexes:
+                try:
+                    session.run(index_query)
+                    logger.info(f"✅ Full-text index '{index_name}' created (or already exists)")
+                except Exception as e:
+                    if "already exists" in str(e).lower():
+                        logger.info(f"ℹ️ Full-text index '{index_name}' already exists")
+                    else:
+                        raise
             
             # Create additional indexes for performance
             logger.info("Creating additional indexes...")
@@ -65,7 +77,10 @@ def create_fulltext_index():
                 ("source_title_index", "CREATE INDEX source_title_index IF NOT EXISTS FOR (s:Source) ON (s.title)"),
                 ("page_title_index", "CREATE INDEX page_title_index IF NOT EXISTS FOR (p:Page) ON (p.title)"),
                 ("quote_fingerprint_index", "CREATE INDEX quote_fingerprint_index IF NOT EXISTS FOR (q:Quote) ON (q.fingerprint)"),
+                ("quote_normalized_text_index", "CREATE INDEX quote_normalized_text_index IF NOT EXISTS FOR (q:Quote) ON (q.normalized_text)"),
                 ("occurrence_key_index", "CREATE INDEX occurrence_key_index IF NOT EXISTS FOR (o:QuoteOccurrence) ON (o.key)"),
+                ("occurrence_is_primary_index", "CREATE INDEX occurrence_is_primary_index IF NOT EXISTS FOR (o:QuoteOccurrence) ON (o.is_primary)"),
+                ("quote_is_primary_index", "CREATE INDEX quote_is_primary_index IF NOT EXISTS FOR (q:Quote) ON (q.is_primary)"),
             ]
             
             for index_name, query in additional_indexes:

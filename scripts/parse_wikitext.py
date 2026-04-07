@@ -22,8 +22,7 @@ import sys
 import unicodedata
 from pathlib import Path
 from typing import List, Dict, Optional, Set, Tuple, Any
-from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -53,6 +52,7 @@ class ExtractedQuote:
     context: Optional[str] = None  # Section context (e.g., "1930s", "Interview")
     quote_type: str = "sourced"  # sourced, attributed, disputed, about
     canonical_quote: Optional[str] = None
+    normalized_quote: Optional[str] = None
     quote_fingerprint: Optional[str] = None
     occurrence_key: Optional[str] = None
     
@@ -126,6 +126,14 @@ class MWParserQuoteExtractor:
             'episode_locator': re.compile(r'\[\d+\.\d+\]|^Episode\s+\d+', re.IGNORECASE),
             'literary_locator': re.compile(r'^(Act|Scene|Book|Chapter|Part)\b', re.IGNORECASE),
         }
+        self.compilation_page_pattern = re.compile(
+            r'\b(?:'
+            r'proverbs?|aphorisms?|sayings?|maxims?|idioms?|quotations?|quotes?\s+about|'
+            r'opening lines|closing lines|first lines|last lines|last words|'
+            r'catchphrases?|taglines?|one-liners?|insults|toasts'
+            r')\b',
+            re.IGNORECASE,
+        )
 
         self.dialogue_prefix_stopwords = {
             'translation', 'source', 'sources', 'note', 'notes', 'context',
@@ -164,8 +172,67 @@ class MWParserQuoteExtractor:
             re.compile(r'[—–-]\s*(?:From\s+)?["""]([^"""]+)["""]\s*(?:by\s+)?([A-Z][^\n]+)?', re.IGNORECASE),
         ]
         
-        # For deduplication
-        self.seen_quote_hashes: Set[str] = set()
+        self.person_role_keywords = {
+            'activist', 'actor', 'actress', 'architect', 'artist', 'astronaut',
+            'author', 'biologist', 'bishop', 'businessman', 'businesswoman',
+            'ceo', 'chairman', 'chemist', 'composer', 'diplomat', 'director',
+            'economist', 'emperor', 'engineer', 'essayist', 'explorer',
+            'filmmaker', 'founder', 'general', 'historian', 'inventor',
+            'journalist', 'king', 'mathematician', 'minister', 'musician',
+            'novelist', 'philosopher', 'physicist', 'playwright', 'poet',
+            'politician', 'president', 'prime minister', 'producer', 'queen',
+            'rapper', 'saint', 'scientist', 'senator', 'singer', 'songwriter',
+            'statesman', 'teacher', 'theologian', 'writer',
+        }
+
+        self.structural_author_exact = {
+            'about', 'attributed', 'cast', 'dialogue', 'episode', 'episodes',
+            'miscellaneous', 'other', 'quotes', 'sourced', 'tagline',
+            'taglines', 'unsourced',
+        }
+        self.structural_author_patterns = [
+            re.compile(r'^(?:episode|episodes?)\b', re.IGNORECASE),
+            re.compile(r'^season\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b', re.IGNORECASE),
+            re.compile(r'^(?:series|act|scene|book|chapter|part)\b', re.IGNORECASE),
+            re.compile(r'^(?:19|20)\d0s$', re.IGNORECASE),
+        ]
+
+        self.stage_direction_prefixes = (
+            'cartoon ', 'closing shot', 'film ', 'opening shot', 'title card',
+        )
+
+        # Generic/trivial dialogue lines that appear hundreds of times in
+        # TV/film transcripts and add no quotable value.  Checked after
+        # stripping trailing punctuation (.!?) so entries should be bare text.
+        self._generic_dialogue: Set[str] = {
+            "What do you mean", "What are you doing", "What are you talking about",
+            "What do you want", "What's going on", "What are you doing here",
+            "What does that mean", "Where are you going", "What did you say",
+            "How do you know", "I don't think so", "What do you think",
+            "What's your name", "I beg your pardon", "I don't understand",
+            "What happened", "Who are you", "Are you okay", "Are you all right",
+            "I don't know", "What is it", "What was that", "Let's go",
+            "Come on", "Thank you", "I'm sorry", "Excuse me", "Never mind",
+            "Of course", "Go ahead", "Wait a minute", "Hold on", "Shut up",
+            "Get out", "Leave me alone", "What's wrong", "Nothing happened",
+            "That's right", "That's not true", "I'm fine", "I'm not sure",
+            "What's that", "Let me go", "I can't believe it", "Good morning",
+            "Good night", "You're right", "What is this", "I have no idea",
+            "What's the matter", "I can explain", "You don't understand",
+            # Additional common TV/film transcript filler lines
+            "What's that supposed to mean", "What did you do", "What are you saying",
+            "Are you serious", "Thank you, sir", "What did he say", "Can I help you",
+            "What do you want from me", "What are you talking about", "Who did this",
+            "I can't do this", "I don't care", "Forget it", "Not now",
+            "I told you", "I know", "Don't do this", "Please don't",
+            "What are you doing to me", "How dare you", "Who are you people",
+            "Get away from me", "What's happening", "Is that so", "Really",
+            "You can't be serious", "I'm telling you", "Listen to me",
+            "Trust me", "Believe me", "Help me", "Save me", "Follow me",
+        }
+
+        # Keep one row per occurrence; only exact duplicate occurrences are removed.
+        self.seen_occurrence_keys: Set[str] = set()
         
         # Validation settings from Config
         self.min_length = Config.QUOTE_MIN_LENGTH
@@ -184,6 +251,14 @@ class MWParserQuoteExtractor:
         normalized = re.sub(r'^[\'"“”‘’«»\-\s]+|[\'"“”‘’«»\-\s]+$', '', normalized)
         return normalized.strip()
 
+    def _normalize_search_text(self, text: str) -> str:
+        """Normalize text for punctuation-insensitive matching and quote fingerprints."""
+        normalized = unicodedata.normalize("NFKD", text or "")
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        normalized = normalized.lower().replace("&", " and ")
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        return " ".join(normalized.split())
+
     def _looks_like_decade_bucket(self, text: Optional[str]) -> bool:
         """Return whether a heading is only a decade/time bucket."""
         return bool(text and re.fullmatch(r'(?:1[0-9]{3}|20[0-2][0-9])s', text.strip()))
@@ -199,39 +274,193 @@ class MWParserQuoteExtractor:
             normalized == prefix or normalized.startswith(prefix + ':') or normalized.startswith(prefix + ' ')
             for prefix in self.editorial_label_prefixes
         )
+
+    def _looks_like_structural_author(self, text: Optional[str]) -> bool:
+        """Return whether text is a section/header label rather than a real speaker/author."""
+        if not text:
+            return False
+        cleaned = self._canonicalize_text(text)
+        if not cleaned:
+            return False
+        if cleaned in self.structural_author_exact:
+            return True
+        if self._looks_like_decade_bucket(cleaned):
+            return True
+        return any(pattern.match(cleaned) for pattern in self.structural_author_patterns)
+
+    def _strip_stage_directions(self, text: Optional[str]) -> str:
+        """Remove leading/trailing stage directions while preserving the spoken quote."""
+        cleaned = self._clean_quote_text(text or "")
+        if not cleaned:
+            return ""
+
+        previous = None
+        while cleaned and cleaned != previous:
+            previous = cleaned
+            cleaned = re.sub(r'^\[[^\[\]]{1,250}\]\s*', '', cleaned).strip()
+            cleaned = re.sub(r'^\([^\(\)]{1,250}\)\s*', '', cleaned).strip()
+            cleaned = re.sub(r'\s*\[[^\[\]]{1,250}\]$', '', cleaned).strip()
+            cleaned = re.sub(r'\s*\([^\(\)]{1,250}\)$', '', cleaned).strip()
+
+        return cleaned.strip(" -–—")
+
+    def _looks_like_stage_direction(self, text: Optional[str]) -> bool:
+        """Return whether text is mostly scene description rather than a quotable utterance."""
+        if not text:
+            return False
+        cleaned = self._clean_quote_text(text)
+        if not cleaned:
+            return False
+        if re.fullmatch(r'\[[^\[\]]{1,500}\]', cleaned):
+            return True
+        if re.fullmatch(r'\([^\(\)]{1,500}\)', cleaned):
+            return True
+        if cleaned.startswith('['):
+            return True
+        lowered = cleaned.lower()
+        return lowered.startswith(self.stage_direction_prefixes)
+
+    def _canonical_author_key(self, quote_dict: Dict[str, Any]) -> str:
+        """Choose the best attribution key for canonical quote deduplication."""
+        candidates = [
+            quote_dict.get('speaker'),
+            quote_dict.get('author'),
+            quote_dict.get('work'),
+            quote_dict.get('source'),
+            quote_dict.get('page_title'),
+        ]
+        for candidate in candidates:
+            normalized = self._canonicalize_text(candidate or "")
+            if normalized and not self._looks_like_structural_author(normalized):
+                return normalized
+        return "unknown"
+
+    def _looks_like_person_page(self, intro: str, wikitext: str) -> bool:
+        """Infer whether the page subject is a person."""
+        intro_lower = intro.lower()
+        years = re.findall(r'\b(?:1[0-9]{3}|20[0-2][0-9])\b', intro)
+        media_terms = (
+            r'(?:film|movie|television series|tv series|television show|sitcom|novel|play|poem|song|album|opera|'
+            r'video game|book|comedy|tragedy|novella|short story|story|memoir|essay|anthology|collection)'
+        )
+
+        if re.search(rf'\bis (?:an?|the)\s+(?:[a-z-]+\s+){{0,6}}{media_terms}\b', intro_lower):
+            return False
+        if re.search(r'\bfictional character\b', intro_lower):
+            return False
+
+        if re.search(r'\b(?:born|died|assassinated)\b', intro_lower):
+            return True
+        if len(years) >= 2 and re.search(r'\b(?:was|is)\b', intro_lower) and not re.search(media_terms, intro_lower):
+            return True
+
+        role_pattern = "|".join(re.escape(role) for role in sorted(self.person_role_keywords))
+        if re.search(
+            rf'\b(?:was|is|served as|became)\b[^.{{}}]{{0,120}}\b(?:{role_pattern})\b',
+            intro,
+            re.IGNORECASE,
+        ):
+            return True
+
+        # Only match categories that unambiguously describe individual people,
+        # not topic categories that mention professions (e.g. "Jewish philosophers"
+        # or "American writers" would falsely match a topic page).
+        return bool(
+            re.search(
+                r'\[\[Category:[^\]]*(?:\d{4}\s+births|\d{4}\s+deaths|living people)',
+                wikitext,
+                re.IGNORECASE,
+            )
+        )
+
+    def _looks_like_tv_page(self, title: str, intro: str, wikitext: str) -> bool:
+        """Infer whether the page is primarily about a television work."""
+        if re.search(r'(?:^|/|\()season\s+\w+', title, re.IGNORECASE):
+            return True
+        if re.search(r'\((?:tv|television)\s+series\)', title, re.IGNORECASE):
+            return True
+        if re.search(
+            r'\bis an?\s+(?:[a-z-]+\s+){0,4}(?:television series|tv series|television show|sitcom|soap opera|anime series|web series)\b',
+            intro,
+            re.IGNORECASE,
+        ):
+            return True
+        return bool(
+            re.search(r'\[\[Category:[^\]]*(?:television|anime|sitcom|soap opera|tv series)', wikitext, re.IGNORECASE)
+        )
+
+    def _looks_like_film_page(self, title: str, intro: str, wikitext: str) -> bool:
+        """Infer whether the page is primarily about a film or movie."""
+        if re.search(r'\((?:film|movie)\)', title, re.IGNORECASE):
+            return True
+        if re.search(r'\bis an?\s+(?:[a-z-]+\s+){0,4}(?:film|movie|motion picture)\b', intro, re.IGNORECASE):
+            return True
+        if re.search(r'==\s*(?:Cast|Taglines)\s*==', wikitext, re.IGNORECASE):
+            return True
+        return bool(re.search(r'\[\[Category:[^\]]*(?:films|film series|movies)', wikitext, re.IGNORECASE))
+
+    def _looks_like_compilation_page(self, title: str, intro: str, wikitext: str) -> bool:
+        """Return whether the page is a quote compilation/list rather than a canonical source page."""
+        intro_lower = intro.lower()
+        if self.compilation_page_pattern.search(title):
+            return True
+        if re.search(r'\b(?:this page|the following|below)\b[^.]{0,120}\b(?:collects|collect|lists|features)\b', intro_lower):
+            return True
+        if re.search(r'\bcollection of\b', intro_lower):
+            return True
+        return bool(
+            re.search(
+                r'\[\[Category:[^\]]*(?:proverbs|aphorisms|sayings|quotations|catchphrases|taglines|one-liners)\b',
+                wikitext,
+                re.IGNORECASE,
+            )
+        )
     
     def create_quote_hash(self, quote_dict: Dict) -> str:
-        """Create a unique hash for a quote based on its content."""
-        quote_text = self._canonicalize_text(quote_dict.get('canonical_quote') or quote_dict.get('quote', ''))
-        author = self._canonicalize_text(quote_dict.get('speaker') or quote_dict.get('author', ''))
-        page_type = quote_dict.get('page_type', '').strip().lower()
-        content = f"{quote_text}||{author}||{page_type}"
-        return hashlib.md5(content.encode('utf-8')).hexdigest()
+        """Create a content-only hash for a quote (author-independent).
+
+        Using only the normalised text means the same sentence attributed to
+        different speakers/pages still resolves to a single canonical Quote
+        node in Neo4j, with separate QuoteOccurrence rows for provenance.
+        """
+        quote_text = self._normalize_search_text(
+            quote_dict.get('normalized_quote')
+            or quote_dict.get('canonical_quote')
+            or quote_dict.get('quote', '')
+        )
+        return hashlib.md5(quote_text.encode('utf-8')).hexdigest()
     
     def is_duplicate(self, quote_dict: Dict) -> bool:
-        """Check if a quote is a duplicate and add to seen set if not."""
-        quote_hash = self.create_quote_hash(quote_dict)
-        
-        if quote_hash in self.seen_quote_hashes:
+        """Check if an extracted quote row duplicates a previously seen occurrence."""
+        occurrence_key = quote_dict.get('occurrence_key')
+        if not occurrence_key:
+            return False
+
+        if occurrence_key in self.seen_occurrence_keys:
             return True
-        
-        self.seen_quote_hashes.add(quote_hash)
+
+        self.seen_occurrence_keys.add(occurrence_key)
         return False
 
     def _build_occurrence_key(self, quote: ExtractedQuote) -> str:
-        """Build a stable occurrence identifier for provenance retention."""
+        """Build a stable occurrence identifier for provenance retention.
+
+        Keyed on (fingerprint, page_title, source) only.  Finer-grained fields
+        like citation, context, and source_locator are intentionally excluded:
+        including them created many near-duplicate rows for the same quote
+        appearing in different sub-sections of the same page (e.g. a decade
+        header like "1930s" vs "1940s"), inflating the output by 3–5×.
+        """
         parts = [
             quote.quote_fingerprint or "",
             quote.page_title or "",
             quote.source or "",
-            quote.source_locator or "",
-            quote.citation or "",
-            quote.context or "",
         ]
         return hashlib.md5("||".join(parts).encode("utf-8")).hexdigest()
 
     def _finalize_quote(self, quote: ExtractedQuote) -> ExtractedQuote:
         """Populate normalized fields before deduplication/export."""
+        quote.quote = self._strip_stage_directions(quote.quote)
         quote.author = self._clean_quote_text(quote.author)
         if quote.source is not None:
             quote.source = self._clean_quote_text(quote.source) or None
@@ -245,26 +474,61 @@ class MWParserQuoteExtractor:
             quote.context = self._clean_quote_text(quote.context) or None
         if quote.speaker is not None:
             quote.speaker = self._clean_quote_text(quote.speaker) or None
+
+        # Prevent author == source == page_title (a common misattribution):
+        # on person/theme pages, the page title is the author, not a source.
+        if quote.page_type in {"person", "theme"} and quote.work == quote.page_title:
+            quote.work = None
         if quote.page_type in {"person", "theme"} and quote.source == quote.page_title:
             quote.source = None
+        # On person pages, if source equals the author it's redundant.
+        if quote.page_type == "person" and quote.source and quote.author:
+            if self._canonicalize_text(quote.source) == self._canonicalize_text(quote.author):
+                quote.source = None
         if self._looks_like_decade_bucket(quote.source):
             quote.source_locator = quote.source_locator or quote.source
             quote.source = None
         if self._looks_like_decade_bucket(quote.work):
             quote.source_locator = quote.source_locator or quote.work
             quote.work = None
+        if not quote.source and quote.work:
+            quote.source = quote.work
+        # Clear source_locator when it just repeats the source — the sub-bullet
+        # parser sometimes writes the work title into both fields simultaneously,
+        # producing three identical values (source / work / source_locator).
+        if quote.source_locator and quote.source:
+            if self._canonicalize_text(quote.source_locator) == self._canonicalize_text(quote.source):
+                quote.source_locator = None
+        if quote.quote_type == "sourced" and not quote.source:
+            quote.quote_type = "attributed"
         quote.canonical_quote = self._canonicalize_text(quote.quote)
+        quote.normalized_quote = self._normalize_search_text(quote.quote)
         quote.quote_fingerprint = self.create_quote_hash(
             {
                 "quote": quote.quote,
                 "canonical_quote": quote.canonical_quote,
+                "normalized_quote": quote.normalized_quote,
                 "author": quote.author,
                 "speaker": quote.speaker,
-                "page_type": quote.page_type,
+                "source": quote.source,
+                "work": quote.work,
+                "page_title": quote.page_title,
             }
         )
         quote.occurrence_key = self._build_occurrence_key(quote)
         return quote
+
+    def _should_keep_finalized_quote(self, quote: ExtractedQuote) -> bool:
+        """Apply high-precision quality gates after context and attribution are resolved."""
+        if not quote.quote or not self._is_valid_quote(quote.quote):
+            return False
+        if self._looks_like_stage_direction(quote.quote):
+            return False
+        if self._looks_like_structural_author(quote.author):
+            return False
+        if quote.speaker and self._looks_like_structural_author(quote.speaker):
+            return False
+        return True
     
     def parse_wikiquote_xml(self, xml_file_path: str, limit: Optional[int] = None) -> List[Dict[str, str]]:
         """
@@ -323,6 +587,9 @@ class MWParserQuoteExtractor:
                                 finalized_quote = self._finalize_quote(quote)
                                 quote_dict = finalized_quote.to_neo4j_dict()
                                 
+                                if not self._should_keep_finalized_quote(finalized_quote):
+                                    continue
+
                                 if not self.is_duplicate(quote_dict):
                                     quotes.append(quote_dict)
                                     self.duplicate_stats['unique_kept'] += 1
@@ -398,23 +665,88 @@ class MWParserQuoteExtractor:
     def _extract_intro_plaintext(self, wikitext: str) -> str:
         """Return a cleaned version of the lead section for light classification."""
         lead = wikitext.split("==", 1)[0]
+        filtered_lines = []
+        for line in lead.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(("[[File:", "[[Image:", "{{", "__")):
+                continue
+            filtered_lines.append(line)
+        lead = "\n".join(filtered_lines)
         try:
-            return self._clean_quote_text(mwparserfromhell.parse(lead).strip_code())
+            intro = self._clean_quote_text(mwparserfromhell.parse(lead).strip_code())
         except Exception:
-            return self._clean_quote_text(lead)
+            intro = self._clean_quote_text(lead)
+        intro = re.sub(r'^[^.!?]{0,200}\bredirects here\.\s*', '', intro, flags=re.IGNORECASE)
+        intro = re.sub(r'^\s*see also\b[^.!?]*\.?\s*', '', intro, flags=re.IGNORECASE)
+        return intro.strip()
+
+    def _infer_author_from_intro(self, intro: str, lead_wikitext: str) -> Optional[str]:
+        """Infer a work author from the lead section when the page is about a work."""
+        linked_author = re.search(
+            r'\bby\s+(?:the\s+[a-z -]{0,40}\s+)?\[\[(?:[^|\]]+\|)?([^\]]+)\]\]',
+            lead_wikitext,
+            re.IGNORECASE,
+        )
+        if linked_author:
+            candidate = self._clean_quote_text(linked_author.group(1))
+            if self._looks_like_person_name(candidate):
+                return candidate
+
+        plain_author = re.search(
+            r'\bby\s+(?:the\s+[a-z -]{0,40}\s+)?([A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+){0,4})\b',
+            intro,
+        )
+        if plain_author:
+            candidate = self._clean_quote_text(plain_author.group(1).strip(" ,.;:"))
+            if self._looks_like_person_name(candidate):
+                return candidate
+
+        return None
+
+    def _looks_like_disambiguation_page(self, intro: str, wikitext: str) -> bool:
+        """Return whether a page is a disambiguation page rather than a quote corpus page."""
+        intro_lower = intro.lower()
+        wikitext_lower = wikitext.lower()
+        return (
+            "{{disambig" in wikitext_lower
+            or re.search(r'\b(?:may|can) refer to\b', intro_lower) is not None
+            or re.search(r'\bdisambiguation\b', intro_lower) is not None
+        )
+
+    def _looks_like_literary_work_page(self, intro: str, wikitext: str) -> bool:
+        """Infer whether the page is primarily about a written work."""
+        intro_lower = intro.lower()
+        work_terms = (
+            r'novel|book|play|poem|comedy|tragedy|novella|short story|story|memoir|essay|'
+            r'dystopian novel|satirical novella|collection|anthology|dialogue|treatise|epic'
+        )
+        if re.search(rf'\bis an?\s+(?:[a-z-]+\s+){{0,6}}(?:{work_terms})\b', intro_lower):
+            # Guard: historical events / periods / movements / places / religions
+            # should not be classified as literary works even if they mention
+            # an essay or memoir in their description.
+            non_work_terms = (
+                r'revolution|war|movement|period|era|empire|kingdom|republic|country|nation|'
+                r'city|region|religion|philosophy|ideology|language|culture|civilization|dynasty'
+            )
+            if re.search(rf'\b(?:{non_work_terms})\b', intro_lower):
+                return False
+            return True
+        if re.search(rf'\bis the\s+(?:[a-z-]+\s+){{0,6}}(?:{work_terms})\b', intro_lower):
+            return True
+        return bool(
+            re.search(r'\[\[Category:[^\]]*(?:novels|plays|poems|books|literature|short stories|works)\b', wikitext, re.IGNORECASE)
+        )
 
     def _classify_page(self, page_title: str, wikitext: str) -> PageMetadata:
         """Infer the page type and default attribution/source behavior."""
+        lead_wikitext = wikitext.split("==", 1)[0]
         intro = self._extract_intro_plaintext(wikitext)
         title = self._clean_quote_text(page_title)
-        inferred_author = None
+        inferred_author = self._infer_author_from_intro(intro, lead_wikitext)
 
-        author_match = re.search(
-            r'\bby\s+([A-Z][A-Za-z0-9 .\'’,-]{2,80})',
-            intro,
-        )
-        if author_match:
-            inferred_author = self._clean_quote_text(author_match.group(1))
+        is_person_page = self._looks_like_person_page(intro, wikitext)
 
         if self.page_type_patterns['calendar_day'].match(title):
             return PageMetadata(title=title, page_type="calendar_day", default_author=title, default_source=title)
@@ -425,7 +757,13 @@ class MWParserQuoteExtractor:
         if re.search(r'\b(village pump|cleanup|requested|sandbox|archive)\b', title, re.IGNORECASE):
             return PageMetadata(title=title, page_type="maintenance", default_author=title, default_source=title)
 
-        if re.search(r'==\s*Season\s+\w+', wikitext, re.IGNORECASE) or re.search(r'===\s*\'\'[^=]+\[\d+\.\d+\]', wikitext):
+        if self._looks_like_disambiguation_page(intro, wikitext):
+            return PageMetadata(title=title, page_type="list_page", default_author=title, default_source=title)
+
+        if self._looks_like_compilation_page(title, intro, wikitext):
+            return PageMetadata(title=title, page_type="list_page", default_author=title, default_source=title)
+
+        if re.search(r'(?:^|/|\()season\s+\w+', title, re.IGNORECASE):
             return PageMetadata(
                 title=title,
                 page_type="tv_show",
@@ -435,7 +773,33 @@ class MWParserQuoteExtractor:
                 inferred_work=title,
             )
 
-        if re.search(r'==\s*Dialogue\s*==', wikitext, re.IGNORECASE) or re.search(r'\bDirected by\b', intro):
+        # Person check MUST precede literary_work: person pages about prolific
+        # authors (Bertrand Russell, Winston Churchill) often mention their
+        # works in the intro and would be mis-detected as literary_work pages.
+        if is_person_page:
+            return PageMetadata(title=title, page_type="person", default_author=title, default_source=None)
+
+        if self._looks_like_literary_work_page(intro, wikitext):
+            return PageMetadata(
+                title=title,
+                page_type="literary_work",
+                default_author=inferred_author or title,
+                default_source=title,
+                inferred_author=inferred_author,
+                inferred_work=title,
+            )
+
+        if self._looks_like_tv_page(title, intro, wikitext):
+            return PageMetadata(
+                title=title,
+                page_type="tv_show",
+                default_author=title,
+                default_source=title,
+                inferred_author=inferred_author,
+                inferred_work=title,
+            )
+
+        if self._looks_like_film_page(title, intro, wikitext):
             return PageMetadata(
                 title=title,
                 page_type="film",
@@ -445,13 +809,19 @@ class MWParserQuoteExtractor:
                 inferred_work=title,
             )
 
+        # Historical/geographic/ideological topic pages (e.g. "French Revolution",
+        # "World War II", "Buddhism") must NOT be reclassified as literary_work
+        # even if their intro mentions a "by <person>" pattern.
+        _is_topic_page = bool(re.search(
+            r'\b(?:revolution|war|movement|period|era|empire|kingdom|republic|'
+            r'country|nation|city|region|religion|philosophy|ideology|language|'
+            r'culture|civilization|dynasty|battle|conflict|century|decade|'
+            r'mythology|history|biography)\b',
+            intro.lower(),
+        ))
+
         if re.search(r'\bQuotes?\b', wikitext) and re.search(r'\*\*\s*\[\[', wikitext) and "Quotes about" not in wikitext:
-            is_person_page = bool(
-                re.search(r'\((?:born\s+)?\d{4}', intro)
-                or re.search(r'\bwas an?\b', intro)
-                or re.search(r'\bwas\b.*\b(author|poet|physicist|philosopher|actor|politician|scientist)\b', intro, re.IGNORECASE)
-            )
-            if not is_person_page and inferred_author:
+            if not is_person_page and inferred_author and not _is_topic_page:
                 return PageMetadata(
                     title=title,
                     page_type="literary_work",
@@ -462,17 +832,17 @@ class MWParserQuoteExtractor:
                 )
 
         if re.search(r'\bCategory:\s*Themes\b', wikitext, re.IGNORECASE) or re.search(r'==\s*Attributed\s*==', wikitext):
-            return PageMetadata(title=title, page_type="theme", default_author=title, default_source=None)
+            # Theme pages (Love, War, etc.) don't have a single author;
+            # individual quotes carry their own attribution from sub-bullets.
+            return PageMetadata(title=title, page_type="theme", default_author="", default_source=None)
 
-        is_person_page = bool(
-            re.search(r'\((?:born\s+)?\d{4}', intro)
-            or re.search(r'\bwas an?\b', intro)
-            or re.search(r'\bwas\b.*\b(author|poet|physicist|philosopher|actor|politician|scientist)\b', intro, re.IGNORECASE)
-        )
-        if is_person_page:
-            return PageMetadata(title=title, page_type="person", default_author=title, default_source=None)
-
-        if inferred_author:
+        # If we have an inferred author but the author name equals the page
+        # title, this is almost certainly a person page that the heuristic
+        # above missed (e.g. Bertrand Russell, Winston Churchill).  Treat it
+        # as a person page rather than literary_work.
+        if inferred_author and not _is_topic_page:
+            if self._canonicalize_text(inferred_author) == self._canonicalize_text(title):
+                return PageMetadata(title=title, page_type="person", default_author=title, default_source=None)
             return PageMetadata(
                 title=title,
                 page_type="literary_work",
@@ -482,7 +852,7 @@ class MWParserQuoteExtractor:
                 inferred_work=title,
             )
 
-        return PageMetadata(title=title, page_type="theme", default_author=title, default_source=None)
+        return PageMetadata(title=title, page_type="theme", default_author="", default_source=None)
 
     def _extract_quotes_from_page(self, wikitext: str, page_title: str) -> List[ExtractedQuote]:
         """Extract quotes from a wiki page using multiple strategies."""
@@ -590,42 +960,89 @@ class MWParserQuoteExtractor:
         
         return quotes
     
+    # Maximum quotes to emit from any single page, keyed by page_type.
+    # TV/film pages produce massive transcripts; hard-cap them at taglines only.
+    _MAX_QUOTES_PER_PAGE: Dict[str, int] = {
+        "person": 150,
+        "literary_work": 150,
+        "theme": 100,
+        "film": 25,
+        "tv_show": 25,
+    }
+    _MAX_QUOTES_PER_PAGE_DEFAULT = 150
+
+    # Sections to whitelist for TV/film — only taglines are curated quotes.
+    _TV_FILM_INCLUDE_SECTIONS = {"taglines", "tagline"}
+
     def _extract_section_quotes(self, wikicode, page_meta: PageMetadata) -> List[ExtractedQuote]:
         """Extract quotes from wiki sections (bullet points, colons, etc.)."""
         quotes = []
+        max_quotes = self._MAX_QUOTES_PER_PAGE.get(
+            page_meta.page_type, self._MAX_QUOTES_PER_PAGE_DEFAULT
+        )
         sections = wikicode.get_sections(include_lead=True, levels=[2])
-        
+
         for section in sections:
             section_str = str(section)
-            
+
             # Determine section title and context
             section_title = ""
             headers = section.filter_headings()
             if headers:
                 section_title = self._clean_quote_text(str(headers[0].title))
-            
+
             # Skip excluded sections
             if self._is_excluded_section(section_title):
                 continue
-            
+
+            # TV/film pages: only extract from Taglines (skip transcript sections).
+            # Full dialogue transcripts are not curated quotes and inflate counts
+            # by orders of magnitude compared to real Wikiquote content.
+            if page_meta.page_type in {"tv_show", "film"}:
+                if section_title.lower().strip() not in self._TV_FILM_INCLUDE_SECTIONS:
+                    continue
+
             # Determine quote type based on section
             quote_type = self._determine_quote_type(section_title)
-            
+
             # Extract year/period context from section
             year_context = self._extract_year_from_text(section_title)
-            
+
             # Parse lines
             lines = section_str.split('\n')
             section_quotes = self._extract_quotes_from_lines(
                 lines, page_meta, section_title, quote_type, year_context
             )
             quotes.extend(section_quotes)
-        
+
+            # Per-page cap: stop once we have enough for this page type
+            if len(quotes) >= max_quotes:
+                quotes = quotes[:max_quotes]
+                break
+
         return quotes
     
+    def _emit_pending(
+        self,
+        pending_quote: Optional["ExtractedQuote"],
+        pending_has_attribution: bool,
+        page_type: str,
+        quotes: List["ExtractedQuote"],
+    ) -> None:
+        """Conditionally emit a pending quote, applying per-page-type attribution rules."""
+        if pending_quote is None:
+            return
+        # Theme pages aggregate quotes from many different authors.  Without an
+        # explicit attribution sub-bullet (** Author, ''Work'') these entries are
+        # essentially anonymous and duplicate quotes that already appear on
+        # higher-quality person/literary_work pages.  Drop them to avoid bloat.
+        if page_type == "theme" and not pending_has_attribution:
+            return
+        quotes.append(pending_quote)
+
     def _extract_quotes_from_lines(
-        self, 
-        lines: List[str], 
+        self,
+        lines: List[str],
         page_meta: PageMetadata,
         section_title: str,
         quote_type: str,
@@ -638,14 +1055,27 @@ class MWParserQuoteExtractor:
         current_work = page_meta.inferred_work
         current_locator = section_title or None
         pending_quote: Optional[ExtractedQuote] = None
-        
+        # Tracks whether the pending quote has received at least one ** attribution
+        # sub-bullet.  Used by theme pages to filter unattributed entries.
+        pending_has_attribution: bool = False
+        in_excluded_subsection = False
+
         for i, line in enumerate(lines):
             line = line.strip()
-            
-            # Check for section headers
+
+            # Check for section headers (any level 2-6)
             header_match = re.match(r'^(={2,6})\s*([^=]+?)\s*\1$', line)
             if header_match:
                 header_text = self._clean_quote_text(header_match.group(2).strip())
+                # Stop collecting quotes while inside excluded sub-sections
+                # (e.g. === External links ===, === References ===)
+                if self._is_excluded_section(header_text):
+                    self._emit_pending(pending_quote, pending_has_attribution, page_meta.page_type, quotes)
+                    pending_quote = None
+                    pending_has_attribution = False
+                    in_excluded_subsection = True
+                    continue
+                in_excluded_subsection = False
                 # Check for year in sub-headers
                 year = self._extract_year_from_text(header_text)
                 if year:
@@ -659,18 +1089,21 @@ class MWParserQuoteExtractor:
                     current_locator,
                 )
                 continue
-            
+
+            if in_excluded_subsection:
+                continue
+
             # Extract quotes from bullet points (*, #)
             if re.match(r'^[*#]\s+', line) and not line.startswith('**') and not line.startswith('##'):
-                # Save pending quote if any
-                if pending_quote:
-                    quotes.append(pending_quote)
-                
+                # Emit the previous pending quote before starting a new one
+                self._emit_pending(pending_quote, pending_has_attribution, page_meta.page_type, quotes)
+                pending_has_attribution = False
+
                 quote_text = self._extract_quote_from_line(line[1:].strip())
                 speaker, quote_text = self._split_speaker_prefix(quote_text)
                 author = speaker or current_author
-                
-                if quote_text and self._is_valid_quote(quote_text):
+
+                if quote_text and not self._looks_like_structural_author(author) and self._is_valid_quote(quote_text):
                     pending_quote = ExtractedQuote(
                         quote=quote_text,
                         author=author,
@@ -687,16 +1120,21 @@ class MWParserQuoteExtractor:
                 else:
                     pending_quote = None
                 continue
-            
+
             # Extract quotes from colon-prefixed lines (:)
+            # On TV/film pages every dialogue line is colon-prefixed; skipping
+            # them here is redundant with the section whitelist above but acts
+            # as a defence-in-depth guard in case a TV/film page slips through.
             if line.startswith(':') and not line.startswith('::'):
+                if page_meta.page_type in {"tv_show", "film"}:
+                    continue
                 colon_text = self._extract_quote_from_line(line[1:].strip())
                 speaker, colon_text = self._split_speaker_prefix(colon_text)
                 author = speaker or current_author
-                
-                if colon_text and self._is_valid_quote(colon_text):
-                    if pending_quote:
-                        quotes.append(pending_quote)
+
+                if colon_text and not self._looks_like_structural_author(author) and self._is_valid_quote(colon_text):
+                    self._emit_pending(pending_quote, pending_has_attribution, page_meta.page_type, quotes)
+                    pending_has_attribution = False
                     pending_quote = ExtractedQuote(
                         quote=colon_text,
                         author=author,
@@ -711,25 +1149,25 @@ class MWParserQuoteExtractor:
                         year=year_context
                     )
                 continue
-            
+
             # Handle sub-bullets for attribution (**, ##, ::)
             if re.match(r'^(\*\*|##|::)\s*', line) and pending_quote:
                 attribution_line = re.sub(r'^(\*\*|##|::)\s*', '', line)
-                
+
                 # Check for translation (foreign language handling)
                 if self._looks_like_translation(attribution_line, pending_quote.quote):
-                    # This might be the actual translation, swap if needed
                     translated = self._clean_quote_text(attribution_line)
                     if translated and self._is_valid_quote(translated):
                         pending_quote.original_text = pending_quote.quote
                         pending_quote.quote = translated
                     continue
-                
+
                 # Try to extract attribution info
                 attribution = self._parse_attribution(attribution_line)
                 if attribution:
                     author, work, locator, year = attribution
                     pending_quote.citation = attribution_line
+                    pending_has_attribution = True
                     if author and not pending_quote.speaker and author != pending_quote.author:
                         pending_quote.author = author
                     if work:
@@ -741,11 +1179,10 @@ class MWParserQuoteExtractor:
                     if year:
                         pending_quote.year = year
                 continue
-        
-        # Don't forget the last pending quote
-        if pending_quote:
-            quotes.append(pending_quote)
-        
+
+        # Emit the last pending quote
+        self._emit_pending(pending_quote, pending_has_attribution, page_meta.page_type, quotes)
+
         return quotes
 
     def _apply_header_context(
@@ -772,13 +1209,21 @@ class MWParserQuoteExtractor:
                 return current_author, current_source, current_work, current_locator
             if self._looks_like_decade_bucket(cleaned):
                 return current_author, None, None, cleaned
+            if self._looks_like_structural_author(cleaned):
+                return current_author, current_source, current_work, current_locator
             return current_author, cleaned, cleaned, cleaned
 
         if page_meta.page_type == "literary_work":
+            if self._looks_like_structural_author(cleaned):
+                return current_author, current_source or page_meta.title, current_work or page_meta.title, current_locator
             return current_author, current_source or page_meta.title, current_work or page_meta.title, cleaned
 
         if page_meta.page_type in {"film", "tv_show"}:
-            if self._looks_like_dialogue_speaker(cleaned):
+            # A header is a character/speaker only when it both looks like a
+            # dialogue speaker AND is NOT a structural label (Taglines, Cast…).
+            # Without this guard "Taglines" would become current_author and all
+            # tagline bullets would be dropped by _looks_like_structural_author.
+            if self._looks_like_dialogue_speaker(cleaned) and not self._looks_like_structural_author(cleaned):
                 return cleaned, current_source or page_meta.title, current_work or page_meta.title, current_locator
             return current_author, current_source or page_meta.title, current_work or page_meta.title, cleaned
 
@@ -830,10 +1275,10 @@ class MWParserQuoteExtractor:
         try:
             parsed = mwparserfromhell.parse(text)
             clean_text = parsed.strip_code()
-            clean_text = self._clean_quote_text(clean_text)
+            clean_text = self._strip_stage_directions(clean_text)
             return clean_text if clean_text else None
         except Exception:
-            return self._clean_quote_text(text)
+            return self._strip_stage_directions(text)
     
     def _clean_quote_text(self, text: str) -> str:
         """Clean quote text of wiki markup and formatting."""
@@ -884,8 +1329,8 @@ class MWParserQuoteExtractor:
         
         # Normalize whitespace
         text = ' '.join(text.split())
-        
-        return text.strip()
+
+        return text.strip().lstrip(':; -–—').strip()
     
     def _parse_attribution(
         self, text: str
@@ -966,24 +1411,18 @@ class MWParserQuoteExtractor:
         return None
     
     def _looks_like_translation(self, text: str, original_quote: str) -> bool:
-        """Check if text looks like a translation of the original quote."""
+        """Check if text looks like a translation of the original quote.
+
+        Only triggers on explicit translation markers.  The previous
+        length-similarity heuristic incorrectly treated attribution sub-bullets
+        (e.g. "''Hamlet'', Act III") as translations and silently swapped them
+        into the quote field, corrupting both the quote text and attribution.
+        """
         if not text or not original_quote:
             return False
-        
-        # Check for translation markers
         translation_markers = ['translation:', 'trans:', 'english:', 'meaning:']
         text_lower = text.lower()
-        if any(marker in text_lower for marker in translation_markers):
-            return True
-        
-        # Check if similar length and different content (potential translation)
-        text_clean = self._clean_quote_text(text)
-        if len(text_clean) > 20 and abs(len(text_clean) - len(original_quote)) < len(original_quote) * 0.5:
-            # Different enough to be a translation
-            if text_clean[:20].lower() != original_quote[:20].lower():
-                return True
-        
-        return False
+        return any(marker in text_lower for marker in translation_markers)
     
     def _extract_year_from_text(self, text: str) -> Optional[str]:
         """Extract a year from text (e.g., from section headers like '1930s')."""
@@ -1064,16 +1503,24 @@ class MWParserQuoteExtractor:
     
     def _is_valid_quote(self, text: str) -> bool:
         """Validate if extracted text is actually a quote."""
+        text = self._strip_stage_directions(text)
         if not text:
             return False
-        
+        if self._looks_like_stage_direction(text):
+            return False
+
         # Length checks (configurable)
         if len(text) < self.min_length or len(text) > self.max_length:
             return False
-        
+
         # Word count check
         word_count = len(text.split())
         if word_count < self.min_words or word_count > self.max_words:
+            return False
+
+        # Reject generic/trivial dialogue (short questions/reactions that are
+        # common in TV/film transcripts but carry no quotable value).
+        if word_count <= 6 and text.rstrip('.!?') in self._generic_dialogue:
             return False
         
         # Sentence count check
@@ -1087,11 +1534,16 @@ class MWParserQuoteExtractor:
             r'^#REDIRECT', r'^\{\{', r'^see also', r'^external links',
             r'^\d+\s*$',  # Just numbers
             r'^https?://',  # URLs
+            r'.*\bredirects here\b.*',
+            r'^not to be confused with\b',
         ]
         
         for pattern in exclude_patterns:
             if re.match(pattern, text, re.IGNORECASE):
                 return False
+
+        if self._looks_like_structural_author(text):
+            return False
         
         # Minimum alphabetic character ratio
         alpha_chars = sum(1 for c in text if c.isalpha())
@@ -1119,6 +1571,10 @@ class MWParserQuoteExtractor:
             r'^from\s+(?:a\s+)?(?:letter|speech|interview|address|essay|book|cosmic)',
             r'^from\s+.+(?:\(\d{4}\)|\d+:\d+|quoted\s+in|published\s+in|available\s+in|translation\s+from)\b',
             r'^(?:as\s+)?quoted\s+(?:in|by)\b',
+            r'^(?:quotes?\s+)?reported\s+in\b',
+            r'^reported\s+by\b',
+            r'^italics\s+as\s+in\b',
+            r'^emphasis\s+(?:as\s+in|in\s+original)\b',
             r'^statement\s+(?:of|at|on|in)\b',
             r'^address\s+(?:at|to|for)\b',
             r'^poem\s+(?:by|on)\b',
@@ -1144,6 +1600,7 @@ class MWParserQuoteExtractor:
             r'^quotes?\s+are\s+arranged\b',
             r'^(?:alphabetized|sorted\s+alphabetically)\s+by\b',
             r'^full\s+text\s+online$',
+            r'^full\s+text\s+(?:at|on)\b',
             r'^content\s*:',
             r'^(?:written|directed)\s+and\s+(?:written|directed)\b',
             r'^\[.*title card.*\]$',
@@ -1156,6 +1613,12 @@ class MWParserQuoteExtractor:
             r'^original(?:ly)?\s+(?:written|text)\s*:',
             r'^may\s+add\s*:',
             r'^einstein\s+and\s+religion\s*:',
+            # Bibliographic/editorial note: "Title (year); commentary..."
+            r'^[a-z][^.!?]{0,60}\(\d{4}\)\s*[;,:]',
+            # "Title (year), p.\d+" or "Title (year), pp.\d+"
+            r'^[a-z][^.!?]{0,60}\(\d{4}\)\s*,\s*pp?\.',
+            # Starts with "For the title essay..." / "This essay is taken from..."
+            r'^(?:for the|this)\s+(?:title\s+)?(?:essay|passage|poem|work)\b',
         ]
         
         for pattern in attribution_starters:

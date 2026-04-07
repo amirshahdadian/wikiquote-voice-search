@@ -1,5 +1,6 @@
 import logging
 import re
+import unicodedata
 from typing import List, Dict, Any, Optional
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
@@ -12,12 +13,14 @@ logger = logging.getLogger(__name__)
 
 class QuoteSearchService:
     PAGE_TYPE_MULTIPLIERS = {
-        "person": 1.15,
-        "literary_work": 1.05,
-        "theme": 0.55,
-        "film": 0.45,
-        "tv_show": 0.4,
+        "person": 1.3,
+        "literary_work": 1.15,
+        "theme": 0.2,
+        "film": 0.1,
+        "tv_show": 0.08,
     }
+    PRIMARY_PAGE_TYPES = ("person", "literary_work")
+    PRIMARY_QUOTE_TYPES = ("sourced", "template", "blockquote")
 
     def __init__(self, uri: str, username: str, password: str):
         """Initialize the search service with Neo4j connection."""
@@ -78,7 +81,7 @@ class QuoteSearchService:
             self.uri = fallback_uri
             return fallback_driver
 
-    def _page_type_multiplier_case(self, property_name: str = "quote.page_type") -> str:
+    def _page_type_multiplier_case(self, property_name: str = "occurrence.page_type") -> str:
         """Return a Cypher CASE expression that prefers high-precision page types."""
         return f"""
         CASE coalesce({property_name}, 'unknown')
@@ -113,6 +116,14 @@ class QuoteSearchService:
         Used by chatbot and voice input.
         """
         return self.search_quotes(query, limit=limit, include_fuzzy=True)
+
+    def _normalize_search_text(self, text: str) -> str:
+        """Normalize text for punctuation-insensitive quote matching."""
+        normalized = unicodedata.normalize("NFKD", text or "")
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        normalized = normalized.lower().replace("&", " and ")
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        return " ".join(normalized.split())
     
     def search_quotes(self, query: str, limit: int = 10, include_fuzzy: bool = True) -> List[Dict[str, Any]]:
         """
@@ -130,7 +141,11 @@ class QuoteSearchService:
         if not query or not query.strip():
             return []
         
-        query = query.strip()
+        query = " ".join(query.strip().split())
+
+        theme_match = re.match(r"^quotes?\s+(?:about|on|regarding)\s+(.+)$", query, re.IGNORECASE)
+        if theme_match:
+            return self.search_by_theme(theme_match.group(1).strip(), limit=limit)
         
         is_partial_quote = self._looks_like_partial_quote(query)
         
@@ -138,35 +153,63 @@ class QuoteSearchService:
             logger.info(f"Detected partial quote search: '{query}'")
             return self._partial_quote_search(query, limit)
         
-        # Standard search for short queries
-        results = []
-        
-        # Strategy 1: Full-text search with exact phrase matching
-        exact_results = self._fulltext_search(query, limit // 2)
-        results.extend(exact_results)
-        
-        # Strategy 2: Keyword-based search if we need more results
-        if len(results) < limit:
-            keyword_results = self._keyword_search(query, limit - len(results))
-            # Avoid duplicates by checking quote text
-            existing_texts = {r['quote_text'] for r in results}
-            for result in keyword_results:
-                if result['quote_text'] not in existing_texts:
-                    results.append(result)
-        
-        # Strategy 3: Fuzzy search for broader matches if enabled
-        if include_fuzzy and len(results) < limit:
-            fuzzy_results = self._fuzzy_search(query, limit - len(results))
-            existing_texts = {r['quote_text'] for r in results}
-            for result in fuzzy_results:
-                if result['quote_text'] not in existing_texts:
-                    results.append(result)
-        
-        # Sort by relevance score and return top results
+        results = self._run_search_pipeline(query, limit, include_fuzzy=include_fuzzy)
         results.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
         
         logger.info(f"Found {len(results)} quotes for query: '{query}'")
         return results[:limit]
+
+    def _run_search_pipeline(self, query: str, limit: int, include_fuzzy: bool = True) -> List[Dict[str, Any]]:
+        """Run primary-corpus search first, then backfill from broader corpora if needed."""
+        results: List[Dict[str, Any]] = []
+        primary_steps = [
+            lambda remaining: self._fulltext_search(query, remaining, scope="primary"),
+            lambda remaining: self._keyword_search(query, remaining, scope="primary"),
+        ]
+        if include_fuzzy:
+            primary_steps.append(lambda remaining: self._fuzzy_search(query, remaining, scope="primary"))
+
+        secondary_steps = [
+            lambda remaining: self._fulltext_search(query, remaining, scope="secondary"),
+            lambda remaining: self._keyword_search(query, remaining, scope="secondary"),
+        ]
+        if include_fuzzy:
+            secondary_steps.append(lambda remaining: self._fuzzy_search(query, remaining, scope="secondary"))
+
+        for step in primary_steps + secondary_steps:
+            remaining = limit - len(results)
+            if remaining <= 0:
+                break
+            results = self._merge_unique_results(results, step(remaining), limit)
+
+        return results
+
+    def _merge_unique_results(
+        self, existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]], limit: int
+    ) -> List[Dict[str, Any]]:
+        """Deduplicate search results across strategies while preserving score ordering."""
+        seen = {
+            (
+                result.get("quote_text"),
+                result.get("author_name"),
+                result.get("source_title"),
+            )
+            for result in existing
+        }
+        merged = list(existing)
+        for result in incoming:
+            key = (
+                result.get("quote_text"),
+                result.get("author_name"),
+                result.get("source_title"),
+            )
+            if key in seen:
+                continue
+            merged.append(result)
+            seen.add(key)
+            if len(merged) >= limit:
+                break
+        return merged
 
     def _looks_like_partial_quote(self, query: str) -> bool:
         """
@@ -194,67 +237,114 @@ class QuoteSearchService:
             return False
 
         return True
+
+    def _fulltext_index_name(self, scope: str) -> str:
+        """Return the full-text index name for the requested search scope."""
+        return "quote_primary_fulltext_index" if scope == "primary" else "quote_fulltext_index"
+
+    def _scope_condition(self, scope: str, occurrence_alias: str = "occurrence") -> str:
+        """Return a Cypher filter for the requested search scope."""
+        primary_condition = f"coalesce({occurrence_alias}.is_primary, false)"
+        if scope == "primary":
+            return primary_condition
+        return f"NOT ({primary_condition})"
     
     def _partial_quote_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
         """
         Search for partial quotes - prioritizes quotes that START with the query.
-        Prefers CONCISE quotes (50-300 chars) that are readable and quotable.
-        Also prefers real authors over topic pages.
-        Falls back to keyword search if no exact partial match found.
+        Prefers concise, clean completions in the primary corpus before broader fallback.
         """
-        # Known topic pages that aren't real authors
-        topic_pages = ['Art', 'Poets', 'Poetry', 'Literature', 'Philosophy', 'Science', 
-                       'Love', 'Life', 'Death', 'Time', 'Nature', 'Music', 'War', 'Peace']
+        results = self._partial_quote_search_in_scope(query, limit, scope="primary")
+        if results:
+            return results
+        logger.info(f"No primary-corpus partial match found, falling back to broader search for '{query}'")
+        return self._partial_quote_search_in_scope(query, limit, scope="secondary")
+
+    def _partial_quote_search_in_scope(self, query: str, limit: int, scope: str) -> List[Dict[str, Any]]:
+        """Search partial quotes within a specific quality scope."""
         page_type_multiplier_case = self._page_type_multiplier_case()
-        
+        scope_condition = self._scope_condition(scope)
+        normalized_query = self._normalize_search_text(query)
+
         cypher_query = f"""
-        MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
-        MATCH (quote)-[:APPEARS_IN]->(source:Source)
-        WHERE toLower(quote.text) CONTAINS toLower($search_text)
-        
-        WITH quote, author, source,
-             toLower(quote.text) AS quote_lower,
-             toLower($search_text) AS query_lower,
+        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
+        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        WHERE {scope_condition}
+          AND coalesce(quote.normalized_text, quote.canonical_text, quote.text) CONTAINS $search_normalized
+
+        WITH quote, occurrence, author, source,
+             coalesce(quote.normalized_text, quote.canonical_text, quote.text) AS normalized_quote,
+             $search_normalized AS query_normalized,
              size(quote.text) AS quote_length,
-             author.name AS author_name
-        
-        // Filter: prefer readable quote lengths
-        WHERE quote_length >= 30 AND quote_length <= 500
-        
-        // Calculate score: prioritize quotes starting with query + concise quotes + real authors
-        WITH quote, author, source, quote_length, author_name, quote_lower, query_lower,
-             CASE 
-                 WHEN quote_lower STARTS WITH query_lower THEN 100.0
-                 WHEN quote_lower ENDS WITH query_lower THEN 50.0
-                 ELSE 10.0
+             size($search_normalized) AS query_length
+
+        WHERE quote_length >= 15 AND quote_length <= 320
+
+        WITH quote, occurrence, author, source, quote_length, query_length, normalized_quote, query_normalized,
+             size(split(normalized_quote, query_normalized)[0]) AS prefix_gap
+
+        WITH quote, occurrence, author, source, quote_length, query_length, normalized_quote, query_normalized, prefix_gap,
+             CASE
+                 WHEN normalized_quote = query_normalized THEN 170.0
+                 WHEN normalized_quote STARTS WITH query_normalized THEN 140.0
+                 WHEN (' ' + normalized_quote) CONTAINS (' ' + query_normalized + ' ') THEN 110.0
+                 WHEN normalized_quote CONTAINS query_normalized THEN 90.0
+                 ELSE 0.0
              END AS position_score,
-             // Bonus for CONCISE quotes (optimal 100-200 chars, penalize very long)
-             CASE 
-                 WHEN quote_length >= 50 AND quote_length <= 200 THEN 30.0
-                 WHEN quote_length > 200 AND quote_length <= 300 THEN 20.0
-                 WHEN quote_length > 300 THEN 5.0
-                 ELSE 10.0
+             CASE
+                 WHEN quote_length >= 18 AND quote_length <= 140 THEN 25.0
+                 WHEN quote_length > 140 AND quote_length <= 220 THEN 15.0
+                 ELSE 5.0
              END AS length_bonus,
-             // Penalty for topic pages (not real authors)
-             CASE 
-                 WHEN author_name IN $topic_pages THEN 0.5
-                 ELSE 1.0
-             END AS author_multiplier,
+             CASE
+                 WHEN quote_length > query_length THEN
+                    CASE
+                        WHEN (quote_length - query_length) <= 40 THEN 35.0
+                        WHEN (quote_length - query_length) <= 120 THEN 18.0
+                        ELSE 5.0
+                    END
+                 ELSE 0.0
+             END AS completion_bonus,
+             CASE
+                 WHEN toFloat(query_length) / quote_length >= 0.55 THEN 35.0
+                 WHEN toFloat(query_length) / quote_length >= 0.35 THEN 22.0
+                 WHEN toFloat(query_length) / quote_length >= 0.2 THEN 10.0
+                 ELSE 0.0
+             END AS coverage_bonus,
+             CASE
+                 WHEN prefix_gap = 0 THEN 25.0
+                 WHEN prefix_gap <= 20 THEN 8.0
+                 WHEN prefix_gap <= 60 THEN -4.0
+                 ELSE -15.0
+             END AS prefix_bonus,
+             CASE occurrence.quote_type
+                 WHEN 'sourced' THEN 20.0
+                 WHEN 'template' THEN 15.0
+                 WHEN 'blockquote' THEN 12.0
+                 WHEN 'attributed' THEN -10.0
+                 ELSE -25.0
+             END AS quote_type_bonus,
+             CASE
+                 WHEN source.title IS NOT NULL THEN 12.0
+                 ELSE -15.0
+             END AS source_bonus,
              {page_type_multiplier_case} AS page_type_multiplier,
              CASE
-                 WHEN quote_lower STARTS WITH query_lower THEN 'beginning'
-                 WHEN quote_lower ENDS WITH query_lower THEN 'end'
-                 WHEN quote_lower CONTAINS query_lower THEN 'middle'
+                 WHEN normalized_quote STARTS WITH query_normalized THEN 'beginning'
+                 WHEN normalized_quote ENDS WITH query_normalized THEN 'end'
+                 WHEN (' ' + normalized_quote) CONTAINS (' ' + query_normalized + ' ') THEN 'middle'
                  ELSE 'distributed'
              END AS match_position
-        
+
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               ((position_score + length_bonus) * author_multiplier * page_type_multiplier) / 130.0 AS relevance_score,
+               occurrence.page_type AS page_type,
+               occurrence.quote_type AS quote_type,
+               ((position_score + length_bonus + completion_bonus + coverage_bonus + prefix_bonus + quote_type_bonus + source_bonus) * page_type_multiplier) / 100.0 AS relevance_score,
                quote_length,
                match_position,
-               'partial_match' AS search_type
+               CASE WHEN $scope = 'primary' THEN 'partial_match_primary' ELSE 'partial_match_secondary' END AS search_type
         
         ORDER BY relevance_score DESC, quote_length ASC
         LIMIT $limit
@@ -262,53 +352,79 @@ class QuoteSearchService:
         
         try:
             with self.driver.session() as session:
-                result = session.run(cypher_query, search_text=query, limit=limit, topic_pages=topic_pages)
+                result = session.run(
+                    cypher_query,
+                    search_normalized=normalized_query,
+                    limit=limit,
+                    scope=scope,
+                    primary_page_types=list(self.PRIMARY_PAGE_TYPES),
+                    primary_quote_types=list(self.PRIMARY_QUOTE_TYPES),
+                )
                 results = [dict(record) for record in result]
-                logger.info(f"Partial quote search found {len(results)} matches for '{query}'")
-                
-                # If no exact partial match, fallback to keyword search
-                if not results:
-                    logger.info(f"No partial match found, falling back to keyword search for '{query}'")
-                    return self._keyword_search(query, limit)
-                
+                logger.info(f"Partial quote search ({scope}) found {len(results)} matches for '{query}'")
                 return results
         except Exception as e:
             logger.error(f"Error in partial quote search: {e}")
-            # Fallback to standard search
-            return self._keyword_search(query, limit)
+            return self._keyword_search(query, limit, scope=scope)
     
-    def _fulltext_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
-        """Full-text search using Neo4j index - prefers concise, quotable quotes."""
-        # Prepare search query for full-text index
-        search_query = self._prepare_fulltext_query(query)
+    def _fulltext_search(self, query: str, limit: int, scope: str = "primary") -> List[Dict[str, Any]]:
+        """Full-text search using Neo4j indexes tuned for the requested corpus scope."""
+        normalized_query = self._normalize_search_text(query)
+        search_query = self._prepare_fulltext_query(normalized_query or query)
         page_type_multiplier_case = self._page_type_multiplier_case()
+        scope_condition = self._scope_condition(scope)
+        index_name = self._fulltext_index_name(scope)
         
         cypher_query = f"""
-        CALL db.index.fulltext.queryNodes('quote_fulltext_index', $search_query)
+        CALL db.index.fulltext.queryNodes('{index_name}', $search_query)
         YIELD node AS quote, score
-        
-        MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote)
-        MATCH (quote)-[:APPEARS_IN]->(source:Source)
-        
-        WITH quote, author, source, score, size(quote.text) AS quote_length
-        
-        // Filter for readable quote lengths (30-500 chars)
-        WHERE quote_length >= 30 AND quote_length <= 500
-        
-        // Adjust score based on length: prefer concise quotes
-        WITH quote, author, source, quote_length,
+
+        MATCH (quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
+        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+
+        WHERE {scope_condition}
+
+        WITH quote, occurrence, author, source, score,
+             coalesce(quote.normalized_text, quote.canonical_text, quote.text) AS normalized_quote,
+             size(quote.text) AS quote_length,
+             size($normalized_query) AS query_length
+
+        WHERE quote_length >= 15 AND quote_length <= 320
+
+        WITH quote, occurrence, author, source, normalized_quote, quote_length, query_length,
              score * CASE 
-                 WHEN quote_length >= 50 AND quote_length <= 200 THEN 1.5
-                 WHEN quote_length > 200 AND quote_length <= 300 THEN 1.2
+                 WHEN quote_length >= 18 AND quote_length <= 160 THEN 1.8
+                 WHEN quote_length > 160 AND quote_length <= 240 THEN 1.35
                  ELSE 1.0
+             END * CASE
+                 WHEN query_length > 0 AND toFloat(query_length) / quote_length >= 0.35 THEN 1.35
+                 WHEN query_length > 0 AND toFloat(query_length) / quote_length >= 0.2 THEN 1.15
+                 ELSE 1.0
+             END * CASE
+                 WHEN source.title IS NOT NULL THEN 1.15
+                 ELSE 0.75
+             END * CASE
+                 WHEN occurrence.quote_type = 'sourced' THEN 1.2
+                 WHEN occurrence.quote_type IN ['template', 'blockquote'] THEN 1.1
+                 ELSE 0.8
+             END * CASE
+                 WHEN normalized_quote STARTS WITH $normalized_query THEN 1.45
+                 WHEN (' ' + normalized_quote) CONTAINS (' ' + $normalized_query + ' ') THEN 1.15
+                 ELSE 1.0
+             END * CASE
+                 WHEN size(split(normalized_quote, $normalized_query)[0]) = 0 THEN 1.2
+                 WHEN size(split(normalized_quote, $normalized_query)[0]) <= 24 THEN 1.05
+                 ELSE 0.85
              END * {page_type_multiplier_case} AS adjusted_score
-        
+
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
+               occurrence.page_type AS page_type,
+               occurrence.quote_type AS quote_type,
                adjusted_score AS relevance_score,
                quote_length,
-               'fulltext' AS search_type
+               CASE WHEN $scope = 'primary' THEN 'fulltext_primary' ELSE 'fulltext_secondary' END AS search_type
         
         ORDER BY adjusted_score DESC, quote_length ASC
         LIMIT $limit
@@ -316,39 +432,53 @@ class QuoteSearchService:
         
         try:
             with self.driver.session() as session:
-                result = session.run(cypher_query, search_query=search_query, limit=limit)
+                result = session.run(
+                    cypher_query,
+                    search_query=search_query,
+                    normalized_query=normalized_query or query.lower(),
+                    limit=limit,
+                    scope=scope,
+                    primary_page_types=list(self.PRIMARY_PAGE_TYPES),
+                    primary_quote_types=list(self.PRIMARY_QUOTE_TYPES),
+                )
                 return [dict(record) for record in result]
         except Exception as e:
             logger.error(f"Error in full-text search: {e}")
             return []
     
-    def _keyword_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
+    def _keyword_search(self, query: str, limit: int, scope: str = "primary") -> List[Dict[str, Any]]:
         """Keyword-based search for individual words in the query."""
         keywords = self._extract_keywords(query)
         if not keywords:
             return []
         page_type_multiplier_case = self._page_type_multiplier_case()
+        scope_condition = self._scope_condition(scope)
         
         # Create CONTAINS conditions for each keyword
         conditions = []
         params = {}
         for i, keyword in enumerate(keywords):
             param_name = f"keyword_{i}"
-            conditions.append(f"toLower(quote.text) CONTAINS toLower(${param_name})")
+            conditions.append(f"coalesce(quote.normalized_text, quote.canonical_text, quote.text) CONTAINS ${param_name}")
             params[param_name] = keyword
         
         where_clause = " AND ".join(conditions)
         
         cypher_query = f"""
-        MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
-        MATCH (quote)-[:APPEARS_IN]->(source:Source)
-        WHERE {where_clause}
+        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
+        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        WHERE {scope_condition} AND {where_clause}
         
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               0.7 * {page_type_multiplier_case} AS relevance_score,
-               'keyword' AS search_type
+               occurrence.page_type AS page_type,
+               occurrence.quote_type AS quote_type,
+               0.75
+               * CASE WHEN source.title IS NOT NULL THEN 1.1 ELSE 0.75 END
+               * CASE WHEN occurrence.quote_type = 'sourced' THEN 1.1 ELSE 0.85 END
+               * {page_type_multiplier_case} AS relevance_score,
+               CASE WHEN $scope = 'primary' THEN 'keyword_primary' ELSE 'keyword_secondary' END AS search_type
         
         ORDER BY size(quote.text) ASC
         LIMIT $limit
@@ -356,30 +486,45 @@ class QuoteSearchService:
         
         try:
             with self.driver.session() as session:
-                result = session.run(cypher_query, limit=limit, **params)
+                result = session.run(
+                    cypher_query,
+                    limit=limit,
+                    scope=scope,
+                    primary_page_types=list(self.PRIMARY_PAGE_TYPES),
+                    primary_quote_types=list(self.PRIMARY_QUOTE_TYPES),
+                    **params,
+                )
                 return [dict(record) for record in result]
         except Exception as e:
             logger.error(f"Error in keyword search: {e}")
             return []
     
-    def _fuzzy_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
+    def _fuzzy_search(self, query: str, limit: int, scope: str = "primary") -> List[Dict[str, Any]]:
         """Fuzzy search using similarity matching."""
         page_type_multiplier_case = self._page_type_multiplier_case()
+        scope_condition = self._scope_condition(scope)
+        normalized_query = self._normalize_search_text(query)
         
         cypher_query = f"""
-        MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
-        MATCH (quote)-[:APPEARS_IN]->(source:Source)
+        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
+        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        WHERE {scope_condition}
         
         // Calculate similarity based on common words
-        WITH quote, author, source,
-             [word IN split(toLower($search_query), ' ') WHERE word IN split(toLower(quote.text), ' ')] AS common_words
+        WITH quote, occurrence, author, source,
+             [word IN split($search_query, ' ') WHERE word IN split(coalesce(quote.normalized_text, quote.canonical_text, quote.text), ' ')] AS common_words
         WHERE size(common_words) > 0
         
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
                source.title AS source_title,
-               (toFloat(size(common_words)) / size(split($search_query, ' '))) * {page_type_multiplier_case} AS relevance_score,
-               'fuzzy' AS search_type
+               occurrence.page_type AS page_type,
+               occurrence.quote_type AS quote_type,
+               (toFloat(size(common_words)) / size(split($search_query, ' ')))
+               * CASE WHEN source.title IS NOT NULL THEN 1.05 ELSE 0.8 END
+               * CASE WHEN occurrence.quote_type = 'sourced' THEN 1.1 ELSE 0.85 END
+               * {page_type_multiplier_case} AS relevance_score,
+               CASE WHEN $scope = 'primary' THEN 'fuzzy_primary' ELSE 'fuzzy_secondary' END AS search_type
         
         ORDER BY relevance_score DESC
         LIMIT $limit
@@ -387,7 +532,14 @@ class QuoteSearchService:
         
         try:
             with self.driver.session() as session:
-                result = session.run(cypher_query, search_query=query, limit=limit)
+                result = session.run(
+                    cypher_query,
+                    search_query=normalized_query,
+                    limit=limit,
+                    scope=scope,
+                    primary_page_types=list(self.PRIMARY_PAGE_TYPES),
+                    primary_quote_types=list(self.PRIMARY_QUOTE_TYPES),
+                )
                 return [dict(record) for record in result]
         except Exception as e:
             logger.error(f"Error in fuzzy search: {e}")
@@ -400,8 +552,8 @@ class QuoteSearchService:
         # Prioritize authors where the query matches the START of a word in their name
         # e.g., "einstein" should match "Albert Einstein" but not "Bret Weinstein"
         cypher_query = f"""
-        MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
-        MATCH (quote)-[:APPEARS_IN]->(source:Source)
+        MATCH (occurrence:QuoteOccurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence)-[:CITED_AS]->(source:Source)
         WHERE toLower(author.name) CONTAINS toLower($author_query)
         
         // Calculate match quality score
@@ -476,8 +628,8 @@ class QuoteSearchService:
            OR author_lower CONTAINS substring(query_lower, 1)
         
         WITH author
-        MATCH (author)-[:ATTRIBUTED_TO]->(quote:Quote)
-        MATCH (quote)-[:APPEARS_IN]->(source:Source)
+        MATCH (occurrence:QuoteOccurrence)-[:ATTRIBUTED_TO]->(author)
+        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence)-[:CITED_AS]->(source:Source)
         
         RETURN DISTINCT quote.text AS quote_text,
                author.name AS author_name,
@@ -512,11 +664,11 @@ class QuoteSearchService:
         cypher_query = f"""
         CALL db.index.fulltext.queryNodes('quote_fulltext_index', $search_terms)
         YIELD node AS quote, score
-        
-        MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote)
-        MATCH (quote)-[:APPEARS_IN]->(source:Source)
-        
-        WITH quote, author, source, score,
+
+        MATCH (quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
+        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+
+        WITH quote, occurrence, author, source, score,
              score * {page_type_multiplier_case} AS adjusted_score
 
         RETURN DISTINCT quote.text AS quote_text,
@@ -542,8 +694,8 @@ class QuoteSearchService:
     def get_popular_authors(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get most quoted authors."""
         cypher_query = """
-        MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
-        WITH author, count(quote) AS quote_count
+        MATCH (occurrence:QuoteOccurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        WITH author, count(DISTINCT occurrence) AS quote_count
         ORDER BY quote_count DESC
         LIMIT $limit
         
@@ -563,8 +715,8 @@ class QuoteSearchService:
         """Get a random quote, optionally from a specific author."""
         if author:
             cypher_query = """
-            MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
-            MATCH (quote)-[:APPEARS_IN]->(source:Source)
+            MATCH (occurrence:QuoteOccurrence)-[:ATTRIBUTED_TO]->(author:Author)
+            MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence)-[:CITED_AS]->(source:Source)
             WHERE toLower(author.name) CONTAINS toLower($author)
             
             WITH quote, author, source, rand() AS r
@@ -578,8 +730,8 @@ class QuoteSearchService:
             params = {'author': author}
         else:
             cypher_query = """
-            MATCH (author:Author)-[:ATTRIBUTED_TO]->(quote:Quote)
-            MATCH (quote)-[:APPEARS_IN]->(source:Source)
+            MATCH (occurrence:QuoteOccurrence)-[:ATTRIBUTED_TO]->(author:Author)
+            MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence)-[:CITED_AS]->(source:Source)
             
             WITH quote, author, source, rand() AS r
             ORDER BY r
@@ -603,7 +755,7 @@ class QuoteSearchService:
     def _prepare_fulltext_query(self, query: str) -> str:
         """Prepare query for full-text search."""
         # Clean the query
-        query = query.strip()
+        query = self._normalize_search_text(query).strip() or query.strip()
         
         # If it's a phrase (contains quotes), use as-is
         if '"' in query:
@@ -623,10 +775,10 @@ class QuoteSearchService:
     def _extract_keywords(self, query: str) -> List[str]:
         """Extract meaningful keywords from query."""
         # Remove common stop words
-        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had'}
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'quote', 'quotes', 'about'}
         
         # Clean and split query
-        words = re.findall(r'\b\w+\b', query.lower())
+        words = self._normalize_search_text(query).split()
         
         # Filter out stop words and short words
         keywords = [word for word in words if word not in stop_words and len(word) > 2]

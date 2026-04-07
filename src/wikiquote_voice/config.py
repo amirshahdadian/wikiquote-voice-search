@@ -70,7 +70,7 @@ class Config:
     # Parser Configuration - Quote Validation
     QUOTE_MIN_LENGTH: int = int(get_env_var("QUOTE_MIN_LENGTH", "15"))
     QUOTE_MAX_LENGTH: int = int(get_env_var("QUOTE_MAX_LENGTH", "500"))
-    QUOTE_MIN_WORDS: int = int(get_env_var("QUOTE_MIN_WORDS", "3"))
-    QUOTE_MAX_WORDS: int = int(get_env_var("QUOTE_MAX_WORDS", "80"))
-    QUOTE_MAX_SENTENCES: int = int(get_env_var("QUOTE_MAX_SENTENCES", "4"))
+    QUOTE_MIN_WORDS: int = int(get_env_var("QUOTE_MIN_WORDS", "5"))
+    QUOTE_MAX_WORDS: int = int(get_env_var("QUOTE_MAX_WORDS", "120"))
+    QUOTE_MAX_SENTENCES: int = int(get_env_var("QUOTE_MAX_SENTENCES", "6"))
     QUOTE_MIN_ALPHA_RATIO: float = float(get_env_var("QUOTE_MIN_ALPHA_RATIO", "0.5"))

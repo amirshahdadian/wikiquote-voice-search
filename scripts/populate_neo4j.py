@@ -50,10 +50,24 @@ class Neo4jPopulator:
             logger.info("Neo4j connection closed")
     
     def clear_database(self):
-        """Clear all nodes and relationships from the database."""
+        """Clear all nodes and relationships from the database in small batches."""
         with self.driver.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
-        logger.info("Database cleared")
+            deleted = 1
+            total = 0
+            while deleted > 0:
+                result = session.run(
+                    """
+                    MATCH (n)
+                    WITH n LIMIT 50000
+                    DETACH DELETE n
+                    RETURN count(*) AS deleted
+                    """
+                )
+                deleted = result.single()["deleted"]
+                total += deleted
+                if deleted > 0:
+                    logger.info(f"Cleared {total:,} nodes so far...")
+        logger.info(f"Database cleared — {total:,} nodes removed")
     
     def create_constraints(self):
         """Create unique constraints for better performance and data integrity."""
@@ -96,24 +110,44 @@ class Neo4jPopulator:
             query = """
             UNWIND $quotes AS quote_data
 
+            // Preserve NULL for missing author/source instead of polluting the
+            // graph with placeholder "Unknown" nodes.
             WITH quote_data,
                  CASE
-                    WHEN quote_data.author IS NULL OR trim(quote_data.author) = '' THEN 'Unknown author'
+                    WHEN quote_data.author IS NULL OR trim(quote_data.author) = '' THEN null
                     ELSE quote_data.author
                  END AS author_name,
                  CASE
-                    WHEN quote_data.source IS NULL OR trim(quote_data.source) = '' THEN 'Unknown source'
+                    WHEN quote_data.source IS NULL OR trim(quote_data.source) = '' THEN null
                     ELSE quote_data.source
                  END AS source_title
+            WITH quote_data, author_name, source_title,
+                 (
+                    quote_data.page_type IN ['person', 'literary_work']
+                    AND quote_data.quote_type IN ['sourced', 'template', 'blockquote']
+                    AND source_title IS NOT NULL
+                    AND author_name IS NOT NULL
+                    AND NOT toLower(quote_data.page_title) =~ '.*\\b(proverbs?|aphorisms?|sayings?|quotations?|quotes?|idioms?|maxims?|slogans?|opening lines|catchphrases|taglines?)\\b.*'
+                    AND NOT toLower(coalesce(author_name,'')) =~ '.*\\b(proverbs?|aphorisms?|sayings?|quotations?|quotes?|idioms?|maxims?|slogans?|opening lines|catchphrases|taglines?)\\b.*'
+                    AND NOT toLower(coalesce(source_title,'')) =~ '.*\\b(proverbs?|aphorisms?|sayings?|quotations?|quotes?|idioms?|maxims?|slogans?|opening lines|catchphrases|taglines?)\\b.*'
+                    AND NOT toLower(quote_data.page_title) =~ '.*\\((?:\\d{4}\\s+)?(?:film|movie|tv|television|series)\\).*'
+                    AND NOT toLower(quote_data.page_title) =~ '.*(?:^|/|\\()season\\s+[a-z0-9]+.*'
+                 ) AS occurrence_is_primary
 
-            MERGE (author:Author {name: author_name})
-            MERGE (source:Source {title: source_title})
+            // Only create Author/Source nodes when we have real values (not NULL).
+            FOREACH (_ IN CASE WHEN author_name IS NOT NULL THEN [1] ELSE [] END |
+                MERGE (a:Author {name: author_name})
+            )
+            FOREACH (_ IN CASE WHEN source_title IS NOT NULL THEN [1] ELSE [] END |
+                MERGE (s:Source {title: source_title})
+            )
             MERGE (page:Page {title: quote_data.page_title})
 
             MERGE (quote:Quote {fingerprint: quote_data.quote_fingerprint})
               ON CREATE SET
                 quote.text = quote_data.quote,
                 quote.canonical_text = coalesce(quote_data.canonical_quote, quote_data.quote),
+                quote.normalized_text = coalesce(quote_data.normalized_quote, quote_data.canonical_quote, quote_data.quote),
                 quote.page_type = quote_data.page_type,
                 quote.quote_type = quote_data.quote_type,
                 quote.primary_author = author_name,
@@ -121,14 +155,39 @@ class Neo4jPopulator:
                 quote.primary_page = quote_data.page_title,
                 quote.work = quote_data.work,
                 quote.year = quote_data.year,
-                quote.original_text = quote_data.original_text
+                quote.original_text = quote_data.original_text,
+                quote.is_primary = occurrence_is_primary
               ON MATCH SET
+                quote.page_type = CASE
+                    WHEN occurrence_is_primary THEN quote_data.page_type
+                    ELSE coalesce(quote.page_type, quote_data.page_type)
+                END,
+                quote.quote_type = CASE
+                    WHEN occurrence_is_primary THEN quote_data.quote_type
+                    ELSE coalesce(quote.quote_type, quote_data.quote_type)
+                END,
+                quote.primary_author = CASE
+                    WHEN occurrence_is_primary AND author_name IS NOT NULL THEN author_name
+                    ELSE coalesce(quote.primary_author, author_name)
+                END,
+                quote.primary_source = CASE
+                    WHEN occurrence_is_primary AND source_title IS NOT NULL THEN source_title
+                    ELSE coalesce(quote.primary_source, source_title)
+                END,
+                quote.primary_page = CASE
+                    WHEN occurrence_is_primary THEN quote_data.page_title
+                    ELSE coalesce(quote.primary_page, quote_data.page_title)
+                END,
                 quote.work = coalesce(quote.work, quote_data.work),
                 quote.year = coalesce(quote.year, quote_data.year),
-                quote.original_text = coalesce(quote.original_text, quote_data.original_text)
+                quote.original_text = coalesce(quote.original_text, quote_data.original_text),
+                quote.normalized_text = coalesce(quote.normalized_text, quote_data.normalized_quote, quote_data.canonical_quote, quote_data.quote),
+                quote.is_primary = coalesce(quote.is_primary, false) OR occurrence_is_primary
 
             MERGE (occurrence:QuoteOccurrence {key: quote_data.occurrence_key})
               ON CREATE SET
+                occurrence.author_name = author_name,
+                occurrence.source_title = source_title,
                 occurrence.page_title = quote_data.page_title,
                 occurrence.page_type = quote_data.page_type,
                 occurrence.context = quote_data.context,
@@ -136,14 +195,51 @@ class Neo4jPopulator:
                 occurrence.source_locator = quote_data.source_locator,
                 occurrence.work = quote_data.work,
                 occurrence.year = quote_data.year,
-                occurrence.quote_type = quote_data.quote_type
+                occurrence.quote_type = quote_data.quote_type,
+                occurrence.is_primary = occurrence_is_primary,
+                occurrence.search_tier = CASE WHEN occurrence_is_primary THEN 'primary' ELSE 'secondary' END
+              ON MATCH SET
+                occurrence.author_name = coalesce(occurrence.author_name, author_name),
+                occurrence.source_title = coalesce(occurrence.source_title, source_title),
+                occurrence.page_type = coalesce(occurrence.page_type, quote_data.page_type),
+                occurrence.context = coalesce(occurrence.context, quote_data.context),
+                occurrence.citation = coalesce(occurrence.citation, quote_data.citation),
+                occurrence.source_locator = coalesce(occurrence.source_locator, quote_data.source_locator),
+                occurrence.work = coalesce(occurrence.work, quote_data.work),
+                occurrence.year = coalesce(occurrence.year, quote_data.year),
+                occurrence.quote_type = coalesce(occurrence.quote_type, quote_data.quote_type),
+                occurrence.is_primary = coalesce(occurrence.is_primary, false) OR occurrence_is_primary,
+                occurrence.search_tier = CASE
+                    WHEN coalesce(occurrence.is_primary, false) OR occurrence_is_primary THEN 'primary'
+                    ELSE 'secondary'
+                END
 
-            MERGE (author)-[:ATTRIBUTED_TO]->(quote)
-            MERGE (quote)-[:APPEARS_IN]->(source)
+            SET quote.search_tier = CASE WHEN quote.is_primary THEN 'primary' ELSE 'secondary' END
+
+            FOREACH (_ IN CASE WHEN quote.is_primary THEN [1] ELSE [] END |
+                SET quote:PrimaryQuote
+            )
+            FOREACH (_ IN CASE WHEN NOT quote.is_primary THEN [1] ELSE [] END |
+                SET quote:SecondaryQuote
+            )
+
+            // Create relationships only when author/source nodes exist (not NULL).
+            WITH quote, occurrence, page, author_name, source_title
             MERGE (quote)-[:EXTRACTED_FROM]->(page)
             MERGE (quote)-[:HAS_OCCURRENCE]->(occurrence)
             MERGE (occurrence)-[:FOUND_ON_PAGE]->(page)
-            MERGE (occurrence)-[:CITED_AS]->(source)
+
+            WITH quote, occurrence, author_name, source_title
+            FOREACH (_ IN CASE WHEN author_name IS NOT NULL THEN [1] ELSE [] END |
+                MERGE (a:Author {name: author_name})
+                MERGE (a)-[:ATTRIBUTED_TO]->(quote)
+                MERGE (occurrence)-[:ATTRIBUTED_TO]->(a)
+            )
+            FOREACH (_ IN CASE WHEN source_title IS NOT NULL THEN [1] ELSE [] END |
+                MERGE (s:Source {title: source_title})
+                MERGE (quote)-[:APPEARS_IN]->(s)
+                MERGE (occurrence)-[:CITED_AS]->(s)
+            )
             """
             
             try:
@@ -198,24 +294,31 @@ def load_quotes_from_json(file_path: str) -> List[Dict[str, Any]]:
         raise
 
 def main():
-    """Main function to populate the Neo4j database."""
+    """Main function to populate the Neo4j database.
+
+    Pass --clear as the first CLI argument to wipe the database before loading.
+    """
+    import sys
+    clear_first = "--clear" in sys.argv
+
     # Load quotes from JSON
     quotes = load_quotes_from_json(Config.QUOTES_FILE)
-    
+
     if not quotes:
         logger.error("No quotes loaded. Please run parse_wikitext.py first.")
         return
-    
+
     # Initialize Neo4j populator using config
     populator = Neo4jPopulator(Config.NEO4J_URI, Config.NEO4J_USERNAME, Config.NEO4J_PASSWORD)
-    
+
     try:
         # Connect to database
         populator.connect()
-        
-        # Optional: Clear existing data (uncomment if needed)
-        # populator.clear_database()
-        
+
+        if clear_first:
+            logger.info("--clear flag set: wiping existing database before load")
+            populator.clear_database()
+
         # Populate database with configured batch size
         populator.populate_quotes(quotes, batch_size=Config.BATCH_SIZE)
         
