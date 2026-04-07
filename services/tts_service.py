@@ -1,439 +1,381 @@
 """
-Text-to-Speech (TTS) Service using NVIDIA NeMo FastPitch + HiFiGAN
-Supports personalized voice output based on user preferences
+Text-to-Speech (TTS) Service — kokoro-onnx backend
+Runs entirely on CPU via ONNX runtime; no CUDA, no NeMo, no MPS complications.
+
+Install:  pip install kokoro-onnx huggingface_hub soundfile
+Model:    onnx-community/Kokoro-82M-v1.0-ONNX (~340 MB, downloaded automatically)
+
+Personalization:  each enrolled user is assigned a Kokoro voice preset stored in
+the ``style`` column of the ``user_tts_preferences`` SQLite table.  The
+``speaking_rate`` column maps directly to Kokoro's ``speed`` parameter.
 """
 
-from contextlib import nullcontext
+from __future__ import annotations
+
+import io
 import logging
+import os
+import sqlite3
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import soundfile as sf
-from pathlib import Path
-import tempfile
-import sqlite3
-from typing import Optional, Dict, Any
 
 from src.wikiquote_voice.config import Config
-from src.wikiquote_voice.nemo_compat import (
-    load_nemo_tts_spec_model,
-    load_nemo_tts_vocoder,
-    resolve_nemo_device,
-)
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Kokoro voice presets — 54 voices total; listed here for reference / round-robin
+# assignment at enrollment time.
+# ---------------------------------------------------------------------------
+KOKORO_VOICES: List[str] = [
+    # American Female
+    "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky",
+    "af_alloy", "af_aoede", "af_jessica", "af_kore", "af_nova", "af_river",
+    # American Male
+    "am_adam", "am_michael", "am_echo", "am_eric", "am_fenrir",
+    "am_liam", "am_onyx", "am_puck",
+    # British Female
+    "bf_emma", "bf_isabella", "bf_alice", "bf_lily",
+    # British Male
+    "bm_george", "bm_lewis", "bm_daniel", "bm_fable",
+]
+
+DEFAULT_VOICE = "af_heart"
+DEFAULT_SPEED = 1.0
+SAMPLE_RATE = 24_000          # Kokoro always produces 24 kHz
 
 
 class TTSService:
     """
-    Personalized TTS Service using NVIDIA NeMo FastPitch (spectrogram generator) + HiFiGAN (vocoder)
-    Supports user-specific voice customization
+    Personalized TTS Service using kokoro-onnx (Kokoro-82M).
+
+    Public interface is identical to the previous NeMo FastPitch+HiFiGAN
+    implementation so the orchestrator and backend need no changes.
+
+    Voice personalization:  each user gets a distinct Kokoro voice preset
+    (``style`` column in the DB) and a custom speed (``speaking_rate`` column).
+    At enrollment time, assign a preset with ``assign_voice_preset()``.
     """
-    
+
     def __init__(self, device: str = "cpu", db_path: str = None):
         """
-        Initialize TTS service with FastPitch and HiFiGAN models
-        
-        Args:
-            device: Device to run on (cpu or cuda)
-            db_path: Path to SQLite database with user preferences
+        Parameters
+        ----------
+        device : str
+            Kept for API compatibility; kokoro-onnx always runs on CPU via ONNX.
+        db_path : str
+            Path to the SQLite database that holds ``user_tts_preferences``.
         """
-        self.device = resolve_nemo_device(device)
         self.db_path = db_path
-        self.spec_generator = None
-        self.vocoder = None
-        logger.info(f"Initializing Personalized TTS Service on {device}")
-        
-    def load_models(self):
-        """Load FastPitch and HiFiGAN models"""
-        if self.spec_generator is None or self.vocoder is None:
-            try:
-                logger.info(
-                    "Loading NeMo 2.x TTS models on %s (spec=%s, vocoder=%s)...",
-                    self.device,
-                    Config.NEMO_TTS_SPEC_MODEL,
-                    Config.NEMO_TTS_VOCODER_MODEL,
-                )
-                self.spec_generator = load_nemo_tts_spec_model(self.device)
-                self.vocoder = load_nemo_tts_vocoder(self.device)
-                
-                logger.info("✅ TTS models loaded successfully")
-                
-            except Exception as e:
-                logger.error(f"Failed to load TTS models: {e}")
-                raise
+        self._kokoro = None
+        logger.info(
+            "TTSService initialised (backend=kokoro-onnx, db=%s)",
+            db_path or "none",
+        )
 
-    def _sample_rate(self, fallback: int = 22050) -> int:
-        """Infer the active vocoder sample rate when available."""
-        if self.vocoder is not None:
-            audio_processor = getattr(self.vocoder, "audio_to_melspec_precessor", None)
-            if audio_processor is not None:
-                sample_rate = getattr(audio_processor, "_sample_rate", None)
-                if sample_rate:
-                    return int(sample_rate)
-        return fallback
+    # ------------------------------------------------------------------
+    # Model loading (lazy)
+    # ------------------------------------------------------------------
+    # GitHub release tag that provides the paired model + voices files
+    _MODEL_RELEASE_BASE = (
+        "https://github.com/thewh1teagle/kokoro-onnx/releases"
+        "/download/model-files-v1.0"
+    )
+    _MODEL_FILENAME  = "kokoro-v1.0.onnx"   # 310 MB — uses 'tokens' input schema
+    _VOICES_FILENAME = "voices-v1.0.bin"     # 27  MB — combined NPZ voices file
 
-    def _inference_context(self):
+    def load_models(self) -> None:
+        """Download / load Kokoro model files (called automatically on first use).
+
+        Both files are downloaded from the official kokoro-onnx GitHub releases
+        and cached in ~/.cache/kokoro_onnx/ for reuse across runs.
         """
-        Return a torch inference context without relying on NeMo 1.x helpers.
-
-        NeMo 2.x models no longer expose ``nemo_infer()``, so inference should
-        run directly against eval-mode models under ``torch.inference_mode()``.
-        """
+        if self._kokoro is not None:
+            return
         try:
-            import torch
+            import urllib.request
+            from pathlib import Path as _Path
+            from kokoro_onnx import Kokoro
 
-            return torch.inference_mode()
-        except Exception:
-            return nullcontext()
+            cache_dir = _Path.home() / ".cache" / "kokoro_onnx"
+            cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def _apply_pitch_scale(self, audio: np.ndarray, sample_rate: int, pitch_scale: float) -> np.ndarray:
-        """
-        Apply a lightweight post-vocoder pitch adjustment when requested.
+            model_path  = cache_dir / self._MODEL_FILENAME
+            voices_path = cache_dir / self._VOICES_FILENAME
 
-        FastPitch personalization hooks changed in NeMo 2.x and the current
-        pretrained English model does not expose the old ``pitch_shift`` path.
-        We preserve user-level pitch customization by shifting the final
-        waveform when the stored preference differs from the neutral value.
-        """
-        resolved_pitch = float(pitch_scale)
-        if np.isclose(resolved_pitch, 1.0, atol=1e-3):
-            return audio
-
-        try:
-            import librosa
-
-            n_steps = float(12.0 * np.log2(max(resolved_pitch, 1e-3)))
-            shifted = librosa.effects.pitch_shift(
-                y=np.asarray(audio, dtype=np.float32),
-                sr=sample_rate,
-                n_steps=n_steps,
-            )
-            return np.asarray(shifted, dtype=np.float32)
-        except Exception as exc:
-            logger.warning("Pitch scaling fallback failed: %s", exc)
-            return audio
-    
-    def synthesize(self, text: str, output_path: str = None, sample_rate: int = 22050) -> np.ndarray:
-        """
-        Synthesize speech from text
-        
-        Args:
-            text: Text to synthesize
-            output_path: Optional path to save audio file
-            sample_rate: Audio sample rate
-            
-        Returns:
-            Audio waveform as numpy array
-        """
-        self.load_models()
-        
-        logger.info(f"Synthesizing: {text}")
-        
-        try:
-            # Parse text with FastPitch
-            with self._inference_context():
-                parsed = self.spec_generator.parse(text)
-                spectrogram = self.spec_generator.generate_spectrogram(tokens=parsed)
-
-            # Convert spectrogram to audio with HiFiGAN
-            with self._inference_context():
-                audio = self.vocoder.convert_spectrogram_to_audio(spec=spectrogram)
-                
-                # Convert to numpy array
-                if hasattr(audio, 'cpu'):
-                    audio_np = audio.detach().cpu().numpy().squeeze()
+            for path, filename in [
+                (model_path, self._MODEL_FILENAME),
+                (voices_path, self._VOICES_FILENAME),
+            ]:
+                if not path.exists():
+                    url = f"{self._MODEL_RELEASE_BASE}/{filename}"
+                    logger.info("Downloading %s → %s …", filename, path)
+                    urllib.request.urlretrieve(url, path)
                 else:
-                    audio_np = np.array(audio).squeeze()
-            
-            # Save to file if path provided
-            if output_path:
-                sf.write(output_path, audio_np, self._sample_rate(sample_rate))
-                logger.info(f"Audio saved to: {output_path}")
-            
-            logger.info("✅ Speech synthesis complete")
-            return audio_np
-            
-        except Exception as e:
-            logger.error(f"Synthesis error: {e}")
+                    logger.info("Using cached %s", path)
+
+            self._kokoro = Kokoro(str(model_path), str(voices_path))
+            logger.info("✅ Kokoro-82M loaded (24 kHz, %d voices)", len(KOKORO_VOICES))
+        except ImportError:
+            logger.error(
+                "kokoro-onnx not installed.  Run: pip install kokoro-onnx"
+            )
             raise
-    
+
+    # ------------------------------------------------------------------
+    # Voice preset helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def assign_voice_preset(user_index: int = 0) -> str:
+        """
+        Return a deterministic Kokoro voice preset for a new user.
+
+        Cycles through ``KOKORO_VOICES`` so each enrolled user gets a
+        different audible voice.  Pass the 0-based index of the new user
+        in the enrolled-user roster.
+        """
+        return KOKORO_VOICES[user_index % len(KOKORO_VOICES)]
+
+    # ------------------------------------------------------------------
+    # DB helpers
+    # ------------------------------------------------------------------
     def get_user_preferences(self, user_id: str) -> Dict[str, Any]:
         """
-        Load TTS preferences for a specific user from database
-        
-        Args:
-            user_id: User identifier
-            
-        Returns:
-            Dictionary of user preferences
+        Load TTS preferences for a specific user from the SQLite database.
+
+        Returns a dict with at least ``style`` (voice preset) and
+        ``speaking_rate`` (speed multiplier).
         """
         if not self.db_path:
-            logger.warning("No database path provided, using defaults")
-            return self._get_default_preferences()
-        
+            logger.warning("No database path configured; using defaults")
+            return self._default_preferences()
+
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT pitch_scale, speaking_rate, energy_scale, style
-                FROM user_tts_preferences
-                WHERE user_id = ?
-            """, (user_id,))
-            
+            cursor.execute(
+                "SELECT pitch_scale, speaking_rate, energy_scale, style "
+                "FROM user_tts_preferences WHERE user_id = ?",
+                (user_id,),
+            )
             row = cursor.fetchone()
             conn.close()
-            
+
             if row:
                 prefs = {
-                    'pitch_scale': row[0],
-                    'speaking_rate': row[1],
-                    'energy_scale': row[2],
-                    'style': row[3]
+                    "pitch_scale": float(row[0] or 1.0),
+                    "speaking_rate": float(row[1] or DEFAULT_SPEED),
+                    "energy_scale": float(row[2] or 1.0),
+                    "style": row[3] or DEFAULT_VOICE,
                 }
-                logger.info(f"Loaded preferences for user '{user_id}': {prefs}")
+                logger.info("Loaded preferences for '%s': %s", user_id, prefs)
                 return prefs
-            else:
-                logger.warning(f"No preferences found for user '{user_id}', using defaults")
-                return self._get_default_preferences()
-                
-        except Exception as e:
-            logger.error(f"Failed to load user preferences: {e}")
-            return self._get_default_preferences()
-    
-    def _get_default_preferences(self) -> Dict[str, Any]:
-        """Get default TTS preferences"""
+
+            logger.warning("No preferences for '%s'; using defaults", user_id)
+            return self._default_preferences()
+
+        except Exception as exc:
+            logger.error("Failed to load preferences for '%s': %s", user_id, exc)
+            return self._default_preferences()
+
+    @staticmethod
+    def _default_preferences() -> Dict[str, Any]:
         return {
-            'pitch_scale': 1.0,
-            'speaking_rate': 1.0,
-            'energy_scale': 1.0,
-            'style': 'neutral'
+            "pitch_scale": 1.0,
+            "speaking_rate": DEFAULT_SPEED,
+            "energy_scale": 1.0,
+            "style": DEFAULT_VOICE,
         }
-    
-    def synthesize_personalized(
-        self, 
-        text: str, 
-        user_id: str = None,
-        output_path: str = None, 
-        sample_rate: int = 22050,
-        preferences: Dict[str, Any] = None
-    ) -> np.ndarray:
+
+    # ------------------------------------------------------------------
+    # Core synthesis
+    # ------------------------------------------------------------------
+    def _synth(
+        self,
+        text: str,
+        voice: str = DEFAULT_VOICE,
+        speed: float = DEFAULT_SPEED,
+        lang: str = "en-us",
+    ) -> Tuple[np.ndarray, int]:
         """
-        Synthesize speech with personalized voice settings
-        
-        Args:
-            text: Text to synthesize
-            user_id: User ID to load preferences for
-            output_path: Optional path to save audio file
-            sample_rate: Audio sample rate
-            preferences: Optional manual preferences (overrides user_id)
-            
-        Returns:
-            Audio waveform as numpy array
+        Call Kokoro and return ``(samples_float32, sample_rate)``.
+
+        Kokoro always outputs 24 kHz mono float32.
         """
         self.load_models()
-        
-        # Load user preferences
-        if preferences is None:
-            if user_id:
-                preferences = self.get_user_preferences(user_id)
-                logger.info(f"Synthesizing for user '{user_id}' with custom preferences")
-            else:
-                preferences = self._get_default_preferences()
-                logger.info("Synthesizing with default preferences")
-        
-        logger.info(f"Preferences: pitch={preferences['pitch_scale']}, "
-                   f"rate={preferences['speaking_rate']}, "
-                   f"energy={preferences['energy_scale']}, "
-                   f"style={preferences['style']}")
-        
-        logger.info(f"Synthesizing: {text}")
-        
-        try:
-            resolved_sample_rate = self._sample_rate(sample_rate)
+        logger.info("Kokoro synthesise — voice=%s  speed=%.2f  text: %s …", voice, speed, text[:60])
+        samples, sample_rate = self._kokoro.create(text, voice=voice, speed=speed, lang=lang)
+        return np.asarray(samples, dtype=np.float32), int(sample_rate)
 
-            # Parse text with FastPitch
-            speaking_rate = max(float(preferences['speaking_rate']), 0.1)
-
-            with self._inference_context():
-                parsed = self.spec_generator.parse(text)
-                spectrogram = self.spec_generator.generate_spectrogram(
-                    tokens=parsed,
-                    pace=1.0 / speaking_rate,
-                )
-            
-            # Convert spectrogram to audio with HiFiGAN
-            with self._inference_context():
-                audio = self.vocoder.convert_spectrogram_to_audio(spec=spectrogram)
-                
-                # Convert to numpy array
-                if hasattr(audio, 'cpu'):
-                    audio_np = audio.detach().cpu().numpy().squeeze()
-                else:
-                    audio_np = np.array(audio).squeeze()
-            
-            audio_np = self._apply_pitch_scale(
-                audio=np.asarray(audio_np, dtype=np.float32),
-                sample_rate=resolved_sample_rate,
-                pitch_scale=preferences['pitch_scale'],
-            )
-
-            # Apply energy scaling (volume)
-            audio_np = audio_np * preferences['energy_scale']
-            
-            # Clip to prevent overflow
-            audio_np = np.clip(audio_np, -1.0, 1.0)
-            
-            # Save to file if path provided
-            if output_path:
-                sf.write(output_path, audio_np, resolved_sample_rate)
-                logger.info(f"Audio saved to: {output_path}")
-            
-            logger.info("✅ Personalized speech synthesis complete")
-            return audio_np
-            
-        except Exception as e:
-            logger.error(f"Synthesis error: {e}")
-            # Fallback to default synthesis
-            logger.warning("Falling back to default synthesis")
-            return self.synthesize(text, output_path, sample_rate)
-    
-    def synthesize_to_bytes(self, text: str, sample_rate: int = 22050) -> bytes:
+    def synthesize(
+        self,
+        text: str,
+        output_path: str = None,
+        sample_rate: int = SAMPLE_RATE,
+    ) -> np.ndarray:
         """
-        Synthesize speech and return as bytes
-        
-        Args:
-            text: Text to synthesize
-            sample_rate: Audio sample rate
-            
-        Returns:
-            Audio data as bytes
+        Synthesize speech from text with the default voice.
+
+        Parameters
+        ----------
+        text : str
+        output_path : str, optional
+            If provided the WAV is written to this path.
+        sample_rate : int
+            Kept for API compatibility; Kokoro always produces 24 kHz
+            regardless of this value.
+
+        Returns
+        -------
+        np.ndarray — float32 waveform at 24 kHz
         """
-        # Synthesize to temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-            tmp_path = tmp_file.name
-        
-        try:
-            # Generate audio
-            self.synthesize(text, output_path=tmp_path, sample_rate=sample_rate)
-            
-            # Read as bytes
-            with open(tmp_path, 'rb') as f:
-                audio_bytes = f.read()
-            
-            return audio_bytes
-            
-        finally:
-            # Clean up temp file
-            import os
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-    
-    def synthesize_personalized_to_bytes(
-        self, 
-        text: str, 
+        audio, sr = self._synth(text)
+        audio = np.clip(audio, -1.0, 1.0)
+
+        if output_path:
+            sf.write(output_path, audio, sr)
+            logger.info("Audio saved → %s", output_path)
+
+        logger.info("✅ Synthesis complete (%d samples @ %d Hz)", len(audio), sr)
+        return audio
+
+    def synthesize_personalized(
+        self,
+        text: str,
         user_id: str = None,
-        sample_rate: int = 22050,
-        preferences: Dict[str, Any] = None
-    ) -> bytes:
+        output_path: str = None,
+        sample_rate: int = SAMPLE_RATE,
+        preferences: Dict[str, Any] = None,
+    ) -> np.ndarray:
         """
-        Synthesize personalized speech and return as bytes
-        
-        Args:
-            text: Text to synthesize
-            user_id: User ID for preferences
-            sample_rate: Audio sample rate
-            preferences: Optional manual preferences
-            
-        Returns:
-            Audio data as bytes
+        Synthesize speech with a user's assigned voice preset and speed.
+
+        Parameters
+        ----------
+        text : str
+        user_id : str, optional
+            Looks up ``style`` (voice preset) and ``speaking_rate`` from DB.
+        output_path : str, optional
+        sample_rate : int
+            Kept for API compatibility; always outputs 24 kHz.
+        preferences : dict, optional
+            Overrides DB lookup when supplied directly.
+
+        Returns
+        -------
+        np.ndarray — float32 waveform at 24 kHz
         """
-        # Synthesize to temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-            tmp_path = tmp_file.name
-        
+        if preferences is None:
+            preferences = (
+                self.get_user_preferences(user_id)
+                if user_id
+                else self._default_preferences()
+            )
+
+        voice = str(preferences.get("style") or DEFAULT_VOICE)
+        speed = float(preferences.get("speaking_rate") or DEFAULT_SPEED)
+        energy = float(preferences.get("energy_scale") or 1.0)
+
+        # Validate voice; fall back gracefully
+        if voice not in KOKORO_VOICES and not voice.startswith(("af_", "am_", "bf_", "bm_")):
+            logger.warning("Unknown voice preset '%s'; falling back to %s", voice, DEFAULT_VOICE)
+            voice = DEFAULT_VOICE
+
+        logger.info(
+            "Personalised synthesis — user=%s  voice=%s  speed=%.2f  energy=%.2f",
+            user_id or "(default)", voice, speed, energy,
+        )
+
         try:
-            # Generate personalized audio
+            audio, sr = self._synth(text, voice=voice, speed=speed)
+            audio = audio * energy
+            audio = np.clip(audio, -1.0, 1.0)
+
+            if output_path:
+                sf.write(output_path, audio, sr)
+                logger.info("Personalised audio saved → %s", output_path)
+
+            logger.info("✅ Personalised synthesis complete")
+            return audio
+
+        except Exception as exc:
+            logger.error("Personalised synthesis failed: %s — falling back to defaults", exc)
+            return self.synthesize(text, output_path=output_path)
+
+    # ------------------------------------------------------------------
+    # Bytes-based helpers (for the backend)
+    # ------------------------------------------------------------------
+    def synthesize_to_bytes(self, text: str, sample_rate: int = SAMPLE_RATE) -> bytes:
+        """Synthesize and return raw WAV bytes."""
+        audio, sr = self._synth(text)
+        audio = np.clip(audio, -1.0, 1.0)
+        return self._to_wav_bytes(audio, sr)
+
+    def synthesize_personalized_to_bytes(
+        self,
+        text: str,
+        user_id: str = None,
+        sample_rate: int = SAMPLE_RATE,
+        preferences: Dict[str, Any] = None,
+    ) -> bytes:
+        """Synthesize personalized speech and return raw WAV bytes."""
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp_path = tmp.name
+        try:
             self.synthesize_personalized(
-                text, 
+                text,
                 user_id=user_id,
-                output_path=tmp_path, 
-                sample_rate=sample_rate,
-                preferences=preferences
+                output_path=tmp_path,
+                preferences=preferences,
             )
-            
-            # Read as bytes
-            with open(tmp_path, 'rb') as f:
-                audio_bytes = f.read()
-            
-            return audio_bytes
-            
+            with open(tmp_path, "rb") as fh:
+                return fh.read()
         finally:
-            # Clean up temp file
-            import os
             if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+                os.unlink(tmp_path)
+
+    @staticmethod
+    def _to_wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
+        buf = io.BytesIO()
+        sf.write(buf, audio, sample_rate, format="WAV")
+        buf.seek(0)
+        return buf.read()
+
+    # ------------------------------------------------------------------
+    # Compatibility helper — kept for any callers that probe model state
+    # ------------------------------------------------------------------
+    def get_backend_info(self) -> Dict[str, Any]:
+        return {
+            "backend": "kokoro-onnx",
+            "model": "Kokoro-82M-v1.0-ONNX",
+            "sample_rate": SAMPLE_RATE,
+            "voices": KOKORO_VOICES,
+            "default_voice": DEFAULT_VOICE,
+        }
 
 
-def demo_personalized_tts():
-    """Demo personalized TTS functionality"""
-    from src.wikiquote_voice.config import Config
-    
-    print("\n🔊 Personalized TTS Demo")
-    print("=" * 60)
-    
-    try:
-        # Initialize TTS service
-        db_path = Path(Config.DATA_DIR) / "wikiquote_voice.db"
-        tts = TTSService(device="cpu", db_path=str(db_path))
-        
-        # Test text
-        test_text = "Welcome to Wikiquote Voice Search. How can I help you today?"
-        
-        # List enrolled users
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT user_id, pitch_scale, speaking_rate, style
-            FROM user_tts_preferences
-        """)
-        
-        users = cursor.fetchall()
-        conn.close()
-        
-        if not users:
-            print("\n⚠️  No users with TTS preferences found!")
-            print("Please enroll users first using: python scripts/enroll_user.py")
-            return
-        
-        print(f"\n✅ Found {len(users)} users with TTS preferences:")
-        for user_id, pitch, rate, style in users:
-            print(f"\n  User: {user_id}")
-            print(f"  Pitch: {pitch}x, Rate: {rate}x, Style: {style}")
-            
-            # Generate speech
-            output_file = f"demo_{user_id}.wav"
-            print(f"  Generating: {output_file}")
-            
-            tts.synthesize_personalized(
-                test_text,
-                user_id=user_id,
-                output_path=output_file
-            )
-            
-            print(f"  ✅ Saved to: {output_file}")
-        
-        print("\n🎉 Demo complete! Check the audio files.")
-        
-    except ImportError:
-        print("\n❌ NeMo not installed!")
-        print('Install with: pip install "nemo-toolkit[asr,tts]>=2.4,<3"')
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+# ---------------------------------------------------------------------------
+# CLI demo
+# ---------------------------------------------------------------------------
+def main() -> None:
+    import sys
+
+    text = (
+        "Imagination is more important than knowledge. "
+        "Knowledge is limited, but imagination encircles the world."
+    )
+    if len(sys.argv) > 1:
+        text = " ".join(sys.argv[1:])
+
+    svc = TTSService(db_path=str(Path(Config.DATA_DIR) / "wikiquote_voice.db"))
+    output = "demo_tts.wav"
+    svc.synthesize(text, output_path=output)
+    print(f"✅  Saved to: {output}")
 
 
 if __name__ == "__main__":
-    demo_personalized_tts()
+    main()

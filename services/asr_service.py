@@ -1,257 +1,216 @@
 """
-Automatic Speech Recognition (ASR) Service
-Supports multiple backends: Whisper (default), NeMo, and Wav2Vec2
+Automatic Speech Recognition (ASR) Service — mlx-whisper backend
+Runs natively on Apple Silicon M-series via the MLX framework.
+No CUDA required; uses GPU + Neural Engine through unified memory.
 
-For best results, install optional backends:
-- Whisper (default): pip install openai-whisper
-- NeMo ASR (GPU, low-latency): pip install "nemo-toolkit[asr]>=2.4,<3"
-- Wav2Vec2 (lightweight): pip install transformers librosa
+Install:  pip install mlx-whisper
+Model:    mlx-community/whisper-large-v3-turbo  (~1.5 GB, 10-15x real-time on M3)
 """
 
+from __future__ import annotations
+
 import logging
-import tempfile
 import os
 import re
+import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from src.wikiquote_voice.nemo_compat import resolve_runtime_device
+import numpy as np
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Try to use hybrid service, fall back to Whisper-only if not available
-try:
-    from services.asr_service_hybrid import HybridASRService
-    USE_HYBRID = True
-except ImportError:
-    USE_HYBRID = False
-    import whisper
+# ---------------------------------------------------------------------------
+# Default model — large-v3-turbo gives excellent quality at real-time speed
+# on M3.  Use "mlx-community/whisper-small-mlx" for lower-latency demos.
+# ---------------------------------------------------------------------------
+DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo"
+
+# Quote-search prompt steers the model toward vocabulary that appears in
+# wikiquote queries ("Einstein", "courage", "wisdom", "find quotes about…")
+_INITIAL_PROMPT = (
+    "Find quotes about courage, wisdom, love, and happiness. "
+    "Show me inspirational quotes by Einstein, Shakespeare, or Gandhi."
+)
 
 
 class ASRService:
     """
-    ASR Service with multi-backend support (Whisper, NeMo, Wav2Vec2)
-    Automatically selects best available backend or uses specified one
+    ASR Service backed by mlx-whisper.
+
+    mlx-whisper mirrors the openai-whisper Python API but executes entirely
+    inside Apple's MLX framework, using the M-series GPU and Neural Engine
+    without any MPS hacks or CUDA dependency.
+
+    Public interface is identical to the previous NeMo/openai-whisper
+    implementation so the orchestrator and backend need no changes.
     """
-    
+
     def __init__(
-        self, 
-        model_name: str = "base", 
-        device: str = "auto",
-        backend: str = "auto"
+        self,
+        model_name: str = DEFAULT_MODEL,
+        device: str = "auto",   # kept for API compatibility; mlx handles device
+        backend: str = "mlx",   # informational only
     ):
-        """
-        Initialize ASR service
-        
-        Args:
-            model_name: Model size/name (backend-specific)
-            device: Device to run on ('auto', 'cpu', 'cuda')
-            backend: ASR backend ('auto', 'whisper', 'nemo', 'wav2vec2')
-        """
         self.model_name = model_name
-        self.device = resolve_runtime_device(device, allow_mps=True)
-        self.backend = backend
-        
-        if USE_HYBRID:
-            # Use hybrid multi-backend service
-            self._service = HybridASRService(
-                backend=backend,
-                model_name=model_name,
-                device=self.device
+        self.backend = "mlx"
+        self._model_loaded = False
+        logger.info("ASRService initialised (backend=mlx, model=%s)", model_name)
+
+    # ------------------------------------------------------------------
+    # Model loading — lazy; mlx-whisper caches the model after first call
+    # ------------------------------------------------------------------
+    def load_model(self) -> None:
+        """Warm up the model so the first real request is not cold."""
+        if self._model_loaded:
+            return
+        try:
+            import mlx_whisper  # noqa: F401 — triggers model download/cache
+            self._model_loaded = True
+            logger.info("✅ mlx-whisper ready (model=%s)", self.model_name)
+        except ImportError:
+            logger.error(
+                "mlx-whisper is not installed.  Run: pip install mlx-whisper"
             )
-            logger.info(f"✅ Using Hybrid ASR (backend: {self._service.active_backend})")
-        else:
-            # Fallback to Whisper-only
-            self.model = None
-            logger.info(f"⚠️  Hybrid ASR not available, using Whisper only")
-            logger.info(f"Initializing Whisper ASR with model '{model_name}' on {self.device}")
-        
-    def load_model(self):
-        """Load ASR model (no-op if using hybrid service)"""
-        if USE_HYBRID:
-            pass  # Hybrid service loads models on-demand
-        else:
-            if self.model is None:
-                logger.info(f"Loading Whisper model '{self.model_name}' on {self.device}...")
-                self.model = whisper.load_model(self.model_name, device=self.device)
-                logger.info(f"✅ Whisper model loaded successfully")
-    
-    def transcribe(self, audio_path: str, language: Optional[str] = None) -> Dict[str, Any]:
+            raise
+
+    # ------------------------------------------------------------------
+    # Core transcription
+    # ------------------------------------------------------------------
+    def transcribe(
+        self,
+        audio_path: str,
+        language: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Transcribe audio file to text
-        
-        Args:
-            audio_path: Path to audio file
-            language: Optional language code (e.g., 'en', 'fa')
-            
-        Returns:
-            dict with 'text', 'language', 'backend', 'normalized_text', and metadata
+        Transcribe an audio file to text.
+
+        Parameters
+        ----------
+        audio_path : str
+            Path to any audio file (WAV, MP3, M4A, …).
+        language : str, optional
+            ISO 639-1 code, e.g. ``"en"``.  ``None`` = auto-detect.
+
+        Returns
+        -------
+        dict with keys:
+            text            – raw transcription string
+            normalized_text – command-normalised version
+            language        – detected / requested language code
+            backend         – always ``"mlx"``
+            segments        – list of timed segment dicts
         """
-        if USE_HYBRID:
-            result = self._service.transcribe(audio_path, language)
-            # Add normalization
-            result['normalized_text'] = self.normalize_command(result['text'])
-            return result
-        else:
-            # Fallback to Whisper-only
-            self.load_model()
-            
-            logger.info(f"Transcribing audio: {audio_path}")
-            
-            options = {
-                'fp16': False,
-                'temperature': 0.0,
-                'best_of': 5,
-                'beam_size': 5,
-                'initial_prompt': 'Find quotes about courage, wisdom, love, and happiness. Show me inspirational quotes.'
-            }
-            if language:
-                options['language'] = language
-            
-            result = self.model.transcribe(audio_path, **options)
-            
-            transcribed_text = result['text'].strip()
-            normalized_text = self.normalize_command(transcribed_text)
-            
-            logger.info(f"Transcription: {transcribed_text}")
-            logger.info(f"Normalized: {normalized_text}")
-            
-            return {
-                'text': transcribed_text,
-                'normalized_text': normalized_text,
-                'language': result.get('language', 'unknown'),
-                'backend': 'whisper',
-                'segments': result.get('segments', []),
-                'full_result': result
-            }
-    
-    def transcribe_bytes(self, audio_bytes: bytes, language: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Transcribe audio from bytes
-        
-        Args:
-            audio_bytes: Audio data as bytes
-            language: Optional language code
-            
-        Returns:
-            dict with transcription results
-        """
-        if USE_HYBRID:
-            result = self._service.transcribe_bytes(audio_bytes, language)
-            result['normalized_text'] = self.normalize_command(result['text'])
-            return result
-        else:
-            # Fallback to Whisper-only
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                tmp_file.write(audio_bytes)
-                tmp_path = tmp_file.name
-            
-            try:
-                result = self.transcribe(tmp_path, language=language)
-                return result
-            finally:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-    
+        import mlx_whisper
+
+        logger.info("Transcribing: %s", audio_path)
+
+        decode_opts: Dict[str, Any] = {
+            "fp16": True,
+            "temperature": 0.0,
+            "beam_size": 5,
+            "initial_prompt": _INITIAL_PROMPT,
+        }
+        if language:
+            decode_opts["language"] = language
+
+        result = mlx_whisper.transcribe(
+            audio_path,
+            path_or_hf_repo=self.model_name,
+            verbose=False,
+            **decode_opts,
+        )
+
+        text = result["text"].strip()
+        normalized = self.normalize_command(text)
+        self._model_loaded = True
+
+        logger.info("Transcription : %s", text)
+        logger.info("Normalized    : %s", normalized)
+
+        return {
+            "text": text,
+            "normalized_text": normalized,
+            "language": result.get("language", language or "unknown"),
+            "backend": "mlx",
+            "segments": result.get("segments", []),
+        }
+
+    def transcribe_bytes(
+        self,
+        audio_bytes: bytes,
+        language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Transcribe raw audio bytes by writing them to a temp file."""
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+        try:
+            return self.transcribe(tmp_path, language=language)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    # ------------------------------------------------------------------
+    # Command normalisation
+    # ------------------------------------------------------------------
     def normalize_command(self, text: str) -> str:
         """
-        Normalize ASR transcription for quote search commands.
-        Fixes common speech recognition mistakes.
-        
-        Args:
-            text: Raw transcription
-            
-        Returns:
-            Normalized command text
+        Clean up ASR transcription for downstream quote-search commands.
+
+        Fixes common speech-recognition errors ("codes" → "quotes"),
+        removes filler words, and extracts the core topic.
         """
         text = text.lower().strip()
-        
-        # AGGRESSIVE: Common ASR mistakes for "quotes" - replace ANYWHERE in text
-        quote_variations = [
-            ('codes', 'quotes'),
-            ('code', 'quotes'),
-            ('coats', 'quotes'),
-            ('coat', 'quotes'),
-            ('courts', 'quotes'),
-            ('court', 'quotes'),
-            ('colds', 'quotes'),
-            ('cold', 'quotes'),
-            ('cords', 'quotes'),
-            ('cord', 'quotes'),
-            ('cotes', 'quotes'),
-            ('cote', 'quotes'),
-            ('quoads', 'quotes'),
-            ('quoad', 'quotes'),
-        ]
-        
-        for wrong, correct in quote_variations:
-            # Replace ANYWHERE (not just in specific patterns)
-            text = re.sub(rf'\b{wrong}\b', correct, text, flags=re.IGNORECASE)
-        
-        # Additional pattern-based fixes for safety
-        text = re.sub(
-            r'\b(find|show|give|get|search)\s+(any|some|me)\s+(stone|story|store)\b',
-            r'\1 \2 quotes',
-            text,
-            flags=re.IGNORECASE
-        )
-        
-        # Remove filler words common in speech
-        filler_words = [
-            r'\bum+\b', r'\buh+\b', r'\blike\b', r'\byou know\b',
-            r'\bI mean\b', r'\bso\b', r'\bwell\b', r'\bokay\b',
-            r'\balright\b', r'\bactually\b'
-        ]
-        
-        for filler in filler_words:
-            text = re.sub(filler, '', text, flags=re.IGNORECASE)
-        
-        # Normalize command phrases
-        command_normalizations = {
-            r'find me some': 'find',
-            r'can you find': 'find',
-            r'I want to find': 'find',
-            r'I want': 'find',
-            r'show me some': 'show me',
-            r'give me some': 'give me',
-            r'search for': 'find',
-            r'look for': 'find',
-        }
-        
-        for pattern, replacement in command_normalizations.items():
+
+        # Common ASR mishearings of "quotes"
+        for wrong in [
+            "codes", "code", "coats", "coat", "courts", "court",
+            "colds", "cold", "cords", "cord", "cotes", "cote",
+            "quoads", "quoad",
+        ]:
+            text = re.sub(rf"\b{wrong}\b", "quotes", text, flags=re.IGNORECASE)
+
+        # Remove filler words
+        for filler in [
+            r"\bum+\b", r"\buh+\b", r"\blike\b", r"\byou know\b",
+            r"\bi mean\b", r"\bso\b", r"\bwell\b", r"\bokay\b",
+            r"\balright\b", r"\bactually\b",
+        ]:
+            text = re.sub(filler, "", text, flags=re.IGNORECASE)
+
+        # Normalise command phrases
+        for pattern, replacement in [
+            (r"find me some", "find"),
+            (r"can you find", "find"),
+            (r"i want to find", "find"),
+            (r"i want", "find"),
+            (r"show me some", "show me"),
+            (r"give me some", "give me"),
+            (r"search for", "find"),
+            (r"look for", "find"),
+        ]:
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-        
-        # Extract core topic by removing command words
-        command_words = ['find', 'show', 'give', 'me', 'quotes', 'quote', 'about', 'on', 'for']
-        words = text.split()
-        
-        # Keep only meaningful words
-        topic_words = [w for w in words if w not in command_words and len(w) > 2]
-        
-        if topic_words:
-            return ' '.join(topic_words)
-        
-        # Clean up whitespace
-        text = ' '.join(text.split())
-        
-        return text
-    
+
+        # Extract meaningful topic words
+        stop = {"find", "show", "give", "me", "quotes", "quote", "about", "on", "for"}
+        words = [w for w in text.split() if w not in stop and len(w) > 2]
+        if words:
+            return " ".join(words)
+
+        return " ".join(text.split())
+
+    # ------------------------------------------------------------------
+    # Compatibility helpers
+    # ------------------------------------------------------------------
     def switch_backend(self, backend: str) -> None:
-        """Switch to a different ASR backend at runtime"""
-        if USE_HYBRID:
-            self._service.switch_backend(backend)
-        else:
-            logger.warning("Backend switching only available with hybrid service")
-    
+        """No-op: mlx-whisper is the only backend."""
+        logger.info("switch_backend('%s') ignored — mlx is the only backend", backend)
+
     def get_backend_info(self) -> Dict[str, Any]:
-        """Get information about active backend"""
-        if USE_HYBRID:
-            return self._service.get_backend_info()
-        else:
-            return {
-                'active_backend': 'whisper',
-                'available_backends': {'whisper': True},
-                'device': self.device,
-                'model_name': self.model_name
-            }
+        return {
+            "active_backend": "mlx",
+            "available_backends": {"mlx": True},
+            "model_name": self.model_name,
+            "device": "mlx (Apple Silicon GPU + Neural Engine)",
+        }

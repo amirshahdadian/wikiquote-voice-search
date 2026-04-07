@@ -80,13 +80,10 @@ class BackendState:
     def health_flags(self) -> dict[str, bool]:
         return {
             "search": self.search_service.driver is not None,
-            "asr": any(
-                importlib.util.find_spec(name) is not None
-                for name in ("whisper", "transformers")
-            ),
-            "speaker_id": importlib.util.find_spec("nemo.collections.asr") is not None,
+            "asr": importlib.util.find_spec("mlx_whisper") is not None,
+            "speaker_id": importlib.util.find_spec("resemblyzer") is not None,
             "tts": (
-                importlib.util.find_spec("nemo.collections.tts") is not None
+                importlib.util.find_spec("kokoro_onnx") is not None
                 or importlib.util.find_spec("gtts") is not None
             ),
             "sqlite": Path(Config.DB_PATH).exists(),
@@ -94,12 +91,12 @@ class BackendState:
 
     def get_asr_service(self) -> ASRService:
         if self._asr_service is None:
-            self._asr_service = ASRService(model_name="small", backend="auto")
+            self._asr_service = ASRService()   # mlx-whisper / whisper-large-v3-turbo
         return self._asr_service
 
     def get_speaker_service(self) -> SpeakerIdentificationService:
         if self._speaker_service is None:
-            self._speaker_service = SpeakerIdentificationService(threshold=0.5)
+            self._speaker_service = SpeakerIdentificationService(threshold=0.75)
         return self._speaker_service
 
     def get_tts_service(self) -> TTSService:

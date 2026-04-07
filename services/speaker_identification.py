@@ -1,420 +1,301 @@
 """
-Speaker Identification Service using NVIDIA NeMo TitaNet
-Enables user enrollment and recognition based on voice embeddings
+Speaker Identification Service — resemblyzer backend
+Runs entirely on CPU; no CUDA, no NeMo, no MPS complications.
+
+Install:  pip install resemblyzer
+Model:    GE2E speaker encoder (downloaded automatically on first use, ~17 MB)
+
+Embedding: 256-dim float32 L2-normalised vector per speaker.
+Cosine similarity is used for enrol/identify (both vectors are unit vectors,
+so dot-product == cosine similarity).
 """
+
+from __future__ import annotations
 
 import logging
 import os
-import tempfile
-import numpy as np
 import pickle
+import tempfile
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
-import librosa
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
 import soundfile as sf
 
 from src.wikiquote_voice.config import Config
-from src.wikiquote_voice.nemo_compat import load_nemo_speaker_model, resolve_nemo_device
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class SpeakerIdentificationService:
     """
-    Speaker Identification using NVIDIA NeMo TitaNet model
-    Supports user enrollment and real-time speaker recognition
+    Speaker Identification using resemblyzer (GE2E speaker encoder).
+
+    Public interface is identical to the previous NeMo/TitaNet implementation
+    so the orchestrator and backend need no changes.
+
+    Enrollment:    record N clips → compute embeddings → average → store .pkl
+    Identification: embed query clip → cosine-sim against enrolled set → best match
     """
-    
-    def __init__(self, threshold: float = 0.7, device: str = "cpu"):
+
+    def __init__(self, threshold: float = 0.75, device: str = "cpu"):
         """
-        Initialize Speaker ID service
-        
-        Args:
-            threshold: Similarity threshold for identification (0-1)
-            device: Device to run on (cpu or cuda)
+        Parameters
+        ----------
+        threshold : float
+            Cosine-similarity threshold for positive identification (0–1).
+            0.75 works well for short ~5 s clips; lower to 0.70 if you see
+            false rejections, raise toward 0.80 to reduce false accepts.
+        device : str
+            Kept for API compatibility; resemblyzer always runs on CPU.
         """
         self.threshold = threshold
-        self.device = resolve_nemo_device(device)
-        self.model = None
-        logger.info(f"Initializing Speaker ID Service (threshold={threshold}, device={device})")
-        
-    def load_model(self):
-        """Load TitaNet speaker recognition model from NeMo"""
-        if self.model is None:
-            try:
-                logger.info(
-                    "Loading NeMo 2.x speaker model '%s' on %s...",
-                    Config.NEMO_SPEAKER_MODEL,
-                    self.device,
-                )
-                self.model = load_nemo_speaker_model(self.device)
-                
-                logger.info("✅ TitaNet model loaded successfully")
-                
-            except Exception as e:
-                logger.error(f"Failed to load TitaNet model: {e}")
-                raise
-    
+        self._encoder = None
+        logger.info(
+            "SpeakerIdentificationService initialised (threshold=%.2f, backend=resemblyzer)",
+            threshold,
+        )
+
+    # ------------------------------------------------------------------
+    # Model loading (lazy)
+    # ------------------------------------------------------------------
+    def _load_encoder(self):
+        if self._encoder is not None:
+            return
+        try:
+            from resemblyzer import VoiceEncoder
+            self._encoder = VoiceEncoder(device="cpu")
+            logger.info("✅ resemblyzer VoiceEncoder loaded")
+        except ImportError:
+            logger.error("resemblyzer is not installed.  Run: pip install resemblyzer")
+            raise
+
+    # ------------------------------------------------------------------
+    # Audio preprocessing helper
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _preprocess(audio_path: str) -> np.ndarray:
+        """
+        Load any audio file and return a resemblyzer-ready float32 waveform.
+
+        resemblyzer's preprocess_wav handles resampling to 16 kHz internally.
+        We keep a thin wrapper here so the rest of the class can call a
+        single method regardless of input format.
+        """
+        from resemblyzer import preprocess_wav
+        return preprocess_wav(Path(audio_path))
+
+    # ------------------------------------------------------------------
+    # Core: extract embedding
+    # ------------------------------------------------------------------
     def extract_embedding(self, audio_path: str) -> np.ndarray:
         """
-        Extract speaker embedding from audio file
-        
-        Args:
-            audio_path: Path to audio file
-            
-        Returns:
-            Speaker embedding as numpy array
+        Compute a 256-dim L2-normalised speaker embedding for one audio clip.
+
+        Parameters
+        ----------
+        audio_path : str
+            Path to any audio file (WAV, MP3, FLAC, …).
+
+        Returns
+        -------
+        np.ndarray, shape (256,), dtype float32
         """
-        self.load_model()
-        
-        logger.info(f"Extracting embedding from: {audio_path}")
-        
-        normalized_audio_path = None
-        try:
-            normalized_audio_path = self._prepare_audio_for_embedding(audio_path)
+        self._load_encoder()
+        logger.info("Extracting embedding from: %s", audio_path)
+        wav = self._preprocess(audio_path)
+        embedding = self._encoder.embed_utterance(wav)   # (256,) float32, unit vector
+        logger.info("Embedding extracted — shape %s", embedding.shape)
+        return embedding
 
-            # Get embedding from model
-            embedding = self.model.get_embedding(normalized_audio_path)
-            
-            # Convert to numpy
-            if hasattr(embedding, "detach") and hasattr(embedding, "cpu"):
-                embedding_np = embedding.cpu().detach().numpy()
-            else:
-                embedding_np = np.array(embedding)
-            
-            # Ensure 1D array
-            embedding_np = embedding_np.flatten()
-            
-            logger.info(f"Embedding shape: {embedding_np.shape}")
-            return embedding_np
-            
-        except Exception as e:
-            logger.error(f"Error extracting embedding: {e}")
-            raise
-        finally:
-            if normalized_audio_path and normalized_audio_path != audio_path and os.path.exists(normalized_audio_path):
-                os.unlink(normalized_audio_path)
-
-    def _prepare_audio_for_embedding(self, audio_path: str, target_sr: int = 16000) -> str:
-        """
-        Normalize arbitrary input audio into a mono 16 kHz WAV file for NeMo.
-
-        NeMo speaker embedding expects 16 kHz mono input. Microphone recordings
-        from Streamlit can carry an extra channel axis, which causes shape errors
-        inside the NeMo preprocessor if passed through untouched.
-        """
-        waveform, sample_rate = librosa.load(audio_path, sr=target_sr, mono=True)
-
-        if waveform.size == 0:
-            raise ValueError("Audio file is empty")
-
-        waveform = np.asarray(waveform, dtype=np.float32).reshape(-1)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-            normalized_path = tmp_file.name
-
-        sf.write(normalized_path, waveform, target_sr, subtype="PCM_16")
-        return normalized_path
-    
+    # ------------------------------------------------------------------
+    # Enrollment
+    # ------------------------------------------------------------------
     def enroll_speaker(self, user_id: str, audio_files: List[str]) -> np.ndarray:
         """
-        Enroll a new speaker by averaging embeddings from multiple audio samples
-        
-        Args:
-            user_id: Unique identifier for the user
-            audio_files: List of paths to audio files (3-5 recommended)
-            
-        Returns:
-            Average embedding for the user
+        Enroll a user by averaging embeddings from multiple clips.
+
+        Parameters
+        ----------
+        user_id : str
+        audio_files : list[str]
+            At least 1 path; 3–5 clips recommended for robustness.
+
+        Returns
+        -------
+        np.ndarray — averaged, L2-normalised embedding, shape (256,)
         """
-        logger.info(f"Enrolling user '{user_id}' with {len(audio_files)} audio samples")
-        
-        if len(audio_files) < 1:
+        if not audio_files:
             raise ValueError("At least 1 audio file required for enrollment")
-        
-        # Extract embeddings from all audio files
-        embeddings = []
-        for audio_file in audio_files:
+
+        self._load_encoder()
+        logger.info("Enrolling '%s' with %d clip(s)", user_id, len(audio_files))
+
+        wavs = []
+        for path in audio_files:
             try:
-                emb = self.extract_embedding(audio_file)
-                embeddings.append(emb)
-            except Exception as e:
-                logger.warning(f"Failed to process {audio_file}: {e}")
-        
-        if not embeddings:
-            raise ValueError("Failed to extract any valid embeddings")
-        
-        # Average the embeddings for robust representation
-        avg_embedding = np.mean(embeddings, axis=0)
-        
-        # Normalize the embedding
-        avg_embedding = avg_embedding / np.linalg.norm(avg_embedding)
-        
-        logger.info(f"✅ User '{user_id}' enrolled successfully")
-        logger.info(f"   Samples used: {len(embeddings)}")
-        logger.info(f"   Embedding shape: {avg_embedding.shape}")
-        
-        return avg_embedding
-    
-    def compute_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+                wavs.append(self._preprocess(path))
+            except Exception as exc:
+                logger.warning("Skipping %s: %s", path, exc)
+
+        if not wavs:
+            raise ValueError("None of the provided audio files could be processed")
+
+        # embed_speaker averages all clips then re-normalises — ideal for enrollment
+        embedding = self._encoder.embed_speaker(wavs)   # (256,) unit vector
+        logger.info(
+            "✅ '%s' enrolled — %d/%d clips used, embedding shape %s",
+            user_id, len(wavs), len(audio_files), embedding.shape,
+        )
+        return embedding
+
+    # ------------------------------------------------------------------
+    # Similarity
+    # ------------------------------------------------------------------
+    @staticmethod
+    def compute_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
         """
-        Compute cosine similarity between two embeddings
-        
-        Args:
-            embedding1: First embedding
-            embedding2: Second embedding
-            
-        Returns:
-            Similarity score (0-1, higher = more similar)
+        Cosine similarity between two embeddings.
+
+        Because resemblyzer returns L2-normalised vectors the dot product
+        equals cosine similarity exactly.  We clip to [0, 1] to avoid
+        tiny numerical negatives.
         """
-        # Ensure embeddings are normalized
-        emb1 = embedding1 / np.linalg.norm(embedding1)
-        emb2 = embedding2 / np.linalg.norm(embedding2)
-        
-        # Compute cosine similarity
-        similarity = np.dot(emb1, emb2)
-        
-        # Clip to [0, 1] range
-        similarity = np.clip(similarity, 0.0, 1.0)
-        
-        return float(similarity)
-    
+        sim = float(np.dot(emb1 / np.linalg.norm(emb1), emb2 / np.linalg.norm(emb2)))
+        return float(np.clip(sim, 0.0, 1.0))
+
+    # ------------------------------------------------------------------
+    # Identification
+    # ------------------------------------------------------------------
     def identify_speaker(
-        self, 
-        audio_path: str, 
-        enrolled_users: Dict[str, np.ndarray]
+        self,
+        audio_path: str,
+        enrolled_users: Dict[str, np.ndarray],
     ) -> Tuple[Optional[str], float]:
         """
-        Identify speaker from audio file
-        
-        Args:
-            audio_path: Path to audio file
-            enrolled_users: Dictionary of {user_id: embedding}
-            
-        Returns:
-            Tuple of (user_id, confidence) or (None, best_score) if unknown
+        Identify the speaker in an audio clip.
+
+        Parameters
+        ----------
+        audio_path : str
+        enrolled_users : dict[str, np.ndarray]
+            {user_id: embedding}
+
+        Returns
+        -------
+        (user_id, confidence) or (None, best_score) if below threshold
         """
-        logger.info(f"Identifying speaker from: {audio_path}")
-        
         if not enrolled_users:
-            logger.warning("No enrolled users in database")
+            logger.warning("No enrolled users — cannot identify")
             return None, 0.0
-        
-        # Extract embedding from query audio
-        query_embedding = self.extract_embedding(audio_path)
-        
-        # Compare with all enrolled users
-        best_match = None
-        best_score = 0.0
-        
-        for user_id, enrolled_embedding in enrolled_users.items():
-            similarity = self.compute_similarity(query_embedding, enrolled_embedding)
-            logger.debug(f"  {user_id}: {similarity:.4f}")
-            
-            if similarity > best_score:
-                best_score = similarity
-                best_match = user_id
-        
-        # Check if best match exceeds threshold
+
+        query = self.extract_embedding(audio_path)
+        best_id, best_score = None, 0.0
+
+        for uid, enrolled_emb in enrolled_users.items():
+            score = self.compute_similarity(query, enrolled_emb)
+            logger.debug("  %s → %.4f", uid, score)
+            if score > best_score:
+                best_score = score
+                best_id = uid
+
         if best_score >= self.threshold:
-            logger.info(f"✅ Identified: {best_match} (confidence: {best_score:.4f})")
-            return best_match, best_score
-        else:
-            logger.info(f"❌ Unknown speaker (best match: {best_match} with {best_score:.4f})")
-            return None, best_score
-    
-    def save_embedding(self, embedding: np.ndarray, file_path: str):
-        """
-        Save embedding to file
-        
-        Args:
-            embedding: Speaker embedding
-            file_path: Path to save the embedding
-        """
-        file_path = Path(file_path)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(file_path, 'wb') as f:
-            pickle.dump(embedding, f)
-        
-        logger.info(f"Embedding saved to: {file_path}")
-    
-    def load_embedding(self, file_path: str) -> np.ndarray:
-        """
-        Load embedding from file
-        
-        Args:
-            file_path: Path to embedding file
-            
-        Returns:
-            Speaker embedding
-        """
-        with open(file_path, 'rb') as f:
-            embedding = pickle.load(f)
-        
-        logger.info(f"Embedding loaded from: {file_path}")
-        return embedding
-    
-    def load_all_embeddings(self, embeddings_dir: str) -> Dict[str, np.ndarray]:
-        """
-        Load all user embeddings from directory
-        
-        Args:
-            embeddings_dir: Directory containing embedding files
-            
-        Returns:
-            Dictionary of {user_id: embedding}
-        """
-        embeddings_dir = Path(embeddings_dir)
-        enrolled_users = {}
-        
-        if not embeddings_dir.exists():
-            logger.warning(f"Embeddings directory not found: {embeddings_dir}")
-            return enrolled_users
-        
-        for emb_file in embeddings_dir.glob("*.pkl"):
-            user_id = emb_file.stem
-            try:
-                embedding = self.load_embedding(emb_file)
-                enrolled_users[user_id] = embedding
-                logger.info(f"Loaded embedding for user: {user_id}")
-            except Exception as e:
-                logger.error(f"Failed to load embedding for {user_id}: {e}")
-        
-        logger.info(f"Loaded {len(enrolled_users)} enrolled users")
-        return enrolled_users
-    
+            logger.info("✅ Identified: %s (%.2f%%)", best_id, best_score * 100)
+            return best_id, best_score
+
+        logger.info("❌ Unknown speaker — best=%s (%.2f%%)", best_id, best_score * 100)
+        return None, best_score
+
     def verify_speaker(
-        self, 
-        audio_path: str, 
-        user_id: str, 
-        enrolled_users: Dict[str, np.ndarray]
+        self,
+        audio_path: str,
+        user_id: str,
+        enrolled_users: Dict[str, np.ndarray],
     ) -> Tuple[bool, float]:
-        """
-        Verify if audio matches a specific enrolled user
-        
-        Args:
-            audio_path: Path to audio file
-            user_id: User ID to verify against
-            enrolled_users: Dictionary of enrolled users
-            
-        Returns:
-            Tuple of (is_match, confidence_score)
-        """
+        """Verify whether an audio clip belongs to a specific enrolled user."""
         if user_id not in enrolled_users:
-            logger.warning(f"User '{user_id}' not found in enrolled users")
+            logger.warning("User '%s' not enrolled", user_id)
             return False, 0.0
-        
-        # Extract query embedding
-        query_embedding = self.extract_embedding(audio_path)
-        
-        # Compare with target user's embedding
-        similarity = self.compute_similarity(query_embedding, enrolled_users[user_id])
-        
-        is_match = similarity >= self.threshold
-        
-        logger.info(f"Verification: {user_id} - {'✅ MATCH' if is_match else '❌ NO MATCH'} ({similarity:.4f})")
-        
-        return is_match, similarity
+        query = self.extract_embedding(audio_path)
+        score = self.compute_similarity(query, enrolled_users[user_id])
+        match = score >= self.threshold
+        logger.info(
+            "Verification %s — %s (%.2f%%)",
+            user_id, "✅ MATCH" if match else "❌ NO MATCH", score * 100,
+        )
+        return match, score
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+    def save_embedding(self, embedding: np.ndarray, file_path: str) -> None:
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as fh:
+            pickle.dump(embedding, fh)
+        logger.info("Embedding saved → %s", path)
+
+    def load_embedding(self, file_path: str) -> np.ndarray:
+        with open(file_path, "rb") as fh:
+            return pickle.load(fh)
+
+    def load_all_embeddings(self, embeddings_dir: str) -> Dict[str, np.ndarray]:
+        """Load every *.pkl file in a directory as {stem: embedding}."""
+        directory = Path(embeddings_dir)
+        users: Dict[str, np.ndarray] = {}
+        if not directory.exists():
+            logger.warning("Embeddings directory not found: %s", directory)
+            return users
+        for pkl in directory.glob("*.pkl"):
+            try:
+                users[pkl.stem] = self.load_embedding(pkl)
+                logger.info("Loaded embedding for '%s'", pkl.stem)
+            except Exception as exc:
+                logger.error("Failed to load '%s': %s", pkl.stem, exc)
+        logger.info("Loaded %d enrolled user(s)", len(users))
+        return users
 
 
-def main():
-    """Demo and testing of Speaker Identification Service"""
+# ---------------------------------------------------------------------------
+# CLI helper
+# ---------------------------------------------------------------------------
+def main() -> None:
     import sys
-    
+
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python speaker_identification.py enroll <user_id> <audio1.wav> [audio2.wav ...]")
+        print("  python speaker_identification.py enroll <user_id> <audio1.wav> [...]")
         print("  python speaker_identification.py identify <audio.wav>")
         print("  python speaker_identification.py verify <user_id> <audio.wav>")
         return
-    
-    from src.wikiquote_voice.config import Config
-    
-    # Initialize service
-    speaker_id = SpeakerIdentificationService(threshold=0.7)
-    
-    # Embeddings directory
+
+    svc = SpeakerIdentificationService(threshold=0.75)
     embeddings_dir = Path(Config.DATA_DIR) / "embeddings"
     embeddings_dir.mkdir(parents=True, exist_ok=True)
-    
-    command = sys.argv[1].lower()
-    
-    if command == "enroll":
-        if len(sys.argv) < 4:
-            print("Error: Need user_id and at least one audio file")
-            return
-        
+    cmd = sys.argv[1].lower()
+
+    if cmd == "enroll" and len(sys.argv) >= 4:
         user_id = sys.argv[2]
         audio_files = sys.argv[3:]
-        
-        print(f"\n🎤 Enrolling user: {user_id}")
-        print(f"📁 Audio files: {len(audio_files)}")
-        
-        # Enroll user
-        embedding = speaker_id.enroll_speaker(user_id, audio_files)
-        
-        # Save embedding
-        embedding_path = embeddings_dir / f"{user_id}.pkl"
-        speaker_id.save_embedding(embedding, embedding_path)
-        
-        print(f"✅ User '{user_id}' enrolled successfully!")
-        print(f"💾 Embedding saved to: {embedding_path}")
-    
-    elif command == "identify":
-        if len(sys.argv) < 3:
-            print("Error: Need audio file path")
-            return
-        
-        audio_path = sys.argv[2]
-        
-        # Load all enrolled users
-        enrolled_users = speaker_id.load_all_embeddings(embeddings_dir)
-        
-        if not enrolled_users:
-            print("❌ No enrolled users found. Enroll users first!")
-            return
-        
-        print(f"\n🔍 Identifying speaker from: {audio_path}")
-        print(f"👥 Enrolled users: {', '.join(enrolled_users.keys())}")
-        
-        # Identify
-        user_id, confidence = speaker_id.identify_speaker(audio_path, enrolled_users)
-        
-        if user_id:
-            print(f"\n✅ Identified: {user_id}")
-            print(f"🎯 Confidence: {confidence:.2%}")
+        emb = svc.enroll_speaker(user_id, audio_files)
+        svc.save_embedding(emb, embeddings_dir / f"{user_id}.pkl")
+        print(f"✅ '{user_id}' enrolled — embedding saved to {embeddings_dir}")
+
+    elif cmd == "identify" and len(sys.argv) >= 3:
+        enrolled = svc.load_all_embeddings(str(embeddings_dir))
+        uid, conf = svc.identify_speaker(sys.argv[2], enrolled)
+        if uid:
+            print(f"✅ Identified: {uid}  ({conf:.0%})")
         else:
-            print(f"\n❌ Unknown speaker")
-            print(f"🎯 Best match score: {confidence:.2%}")
-    
-    elif command == "verify":
-        if len(sys.argv) < 4:
-            print("Error: Need user_id and audio file")
-            return
-        
-        user_id = sys.argv[2]
-        audio_path = sys.argv[3]
-        
-        # Load enrolled users
-        enrolled_users = speaker_id.load_all_embeddings(embeddings_dir)
-        
-        print(f"\n🔐 Verifying: {user_id}")
-        print(f"📁 Audio: {audio_path}")
-        
-        # Verify
-        is_match, confidence = speaker_id.verify_speaker(audio_path, user_id, enrolled_users)
-        
-        if is_match:
-            print(f"\n✅ VERIFIED: This is {user_id}")
-            print(f"🎯 Confidence: {confidence:.2%}")
-        else:
-            print(f"\n❌ NOT VERIFIED: This is not {user_id}")
-            print(f"🎯 Similarity: {confidence:.2%}")
-    
+            print(f"❌ Unknown speaker (best score: {conf:.0%})")
+
+    elif cmd == "verify" and len(sys.argv) >= 4:
+        enrolled = svc.load_all_embeddings(str(embeddings_dir))
+        match, conf = svc.verify_speaker(sys.argv[3], sys.argv[2], enrolled)
+        print(f"{'✅ MATCH' if match else '❌ NO MATCH'} — {conf:.0%}")
+
     else:
-        print(f"Unknown command: {command}")
+        print(f"Unknown command or missing arguments: {sys.argv[1]}")
 
 
 if __name__ == "__main__":

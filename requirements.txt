@@ -1,9 +1,9 @@
-#  Core 
+# Core
 neo4j>=5.0.0
 python-dotenv>=1.0.0
 mwparserfromhell>=0.6.0
 
-# Web & API 
+# Web & API
 fastapi>=0.100.0
 uvicorn[standard]>=0.23.0
 pydantic>=2.0.0
@@ -11,25 +11,31 @@ python-multipart>=0.0.9
 streamlit>=1.32.0
 audio-recorder-streamlit>=0.0.8
 
-#  Voice AI - ASR 
-openai-whisper>=20230314
-torch>=2.0.0
-torchaudio>=2.0.0
-transformers>=4.40.0
+# Voice AI — ASR (Apple Silicon / mlx)
+# Runs natively on M-series GPU + Neural Engine via the MLX framework.
+# Replaces openai-whisper, faster-whisper, and NeMo Conformer.
+mlx-whisper>=0.4.0
 
-# Audio Processing 
+# Voice AI — Speaker Identification (CPU, GE2E embeddings)
+# Replaces NeMo TitaNet.
+resemblyzer>=0.1.1.dev0
+
+# Voice AI — TTS (CPU, ONNX, 54 voices, 24 kHz)
+# Replaces NeMo FastPitch + HiFiGAN and gTTS.
+# Pin to 0.4.x — compatible with the kokoro-v1.0.onnx model (uses 'tokens' input)
+# 0.5.0 introduced a breaking dtype change for the 'speed' input that conflicts
+# with the model-files-v1.0 release weights.
+kokoro-onnx>=0.4.0,<0.5.0
+huggingface_hub>=0.23.0
+
+# Audio Processing
 soundfile>=0.12.0
 sounddevice>=0.4.0
-librosa>=0.10.0
 numpy>=1.24.0
-gTTS>=2.5.0
 
 # Similarity & NLP
 scikit-learn>=1.3.0
 scipy>=1.11.0
 
-# Utilities 
+# Utilities
 lxml>=4.9.0
-
-# Optional heavy dependency for Speaker ID + NeMo TTS:
-# nemo-toolkit[asr,tts]>=2.4,<3
