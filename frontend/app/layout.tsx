@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Lora } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
@@ -27,6 +27,9 @@ export const metadata: Metadata = {
   title: "WikiQuote Voice Search",
   description:
     "Voice-first Wikiquote search with speaker recognition and personalized TTS. Find any quote, hands-free.",
+};
+
+export const viewport: Viewport = {
   themeColor: "#07080f",
 };
 

@@ -59,10 +59,15 @@ class ChatbotService:
         
         # Check for topic search first (more specific patterns)
         topic_patterns = [
+            # "something/anything about X"
+            r'(?:something|anything|quotes?)\s+(?:about|on|regarding)\s+(.+)',
+            # "what did X say" / "what has X said" — author pattern handled below; topic fallback
             r'(?:find|search|show|get|give me|looking for|want|need)\s+(?:some\s+)?quotes?\s+(?:about|on|regarding)\s+(.+)',
             r'(?:please\s+)?(?:find|get|show)\s+(?:me\s+)?(?:some\s+)?quotes?\s+(?:about|on|regarding)\s+(.+)',
             r'quotes?\s+(?:about|on|regarding)\s+(.+)',
             r'(?:what are|tell me)\s+(?:some\s+)?quotes?\s+(?:about|on|regarding)\s+(.+)',
+            # bare "about X" / "on X"
+            r'^(?:about|on)\s+(.+)',
         ]
         
         for pattern in topic_patterns:
@@ -83,6 +88,8 @@ class ChatbotService:
         # Check for author search (only if no "about" keyword)
         if 'about' not in message_lower and 'regarding' not in message_lower:
             author_patterns = [
+                # "what did Einstein say/write" / "what has X said"
+                r'what\s+(?:did|has|have)\s+(.+?)\s+(?:say|said|write|written|wrote)',
                 r'(?:show me|find|get)\s+(.+?)(?:\'s)?\s+quotes?',
                 r'(.+?)(?:\'s)?\s+quotes?$',
                 r'quotes?\s+(?:by|from)\s+(.+)',
