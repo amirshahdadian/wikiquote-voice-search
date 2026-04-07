@@ -1,34 +1,45 @@
 import type { Metadata } from "next";
-import { Manrope, Work_Sans } from "next/font/google";
+import { Geist, Geist_Mono, Lora } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
 
-const manrope = Manrope({
+const geist = Geist({
   subsets: ["latin"],
-  variable: "--font-headline",
+  variable: "--font-geist",
+  display: "swap",
 });
 
-const workSans = Work_Sans({
+const geistMono = Geist_Mono({
   subsets: ["latin"],
-  variable: "--font-body",
+  variable: "--font-geist-mono",
+  display: "swap",
+});
+
+const lora = Lora({
+  subsets: ["latin"],
+  variable: "--font-lora",
+  display: "swap",
+  style: ["normal", "italic"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
-  title: "Which Quote",
-  description: "Voice-first Wikiquote search with speaker recognition and personalized TTS.",
+  title: "WikiQuote Voice Search",
+  description:
+    "Voice-first Wikiquote search with speaker recognition and personalized TTS. Find any quote, hands-free.",
+  themeColor: "#07080f",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: ReactNode;
-}>) {
+}: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
-      <body className={`${manrope.variable} ${workSans.variable} min-h-screen bg-scholarly-background text-ink antialiased`}>
-        <div className="relative isolate overflow-x-hidden">
-          {children}
-        </div>
+    <html
+      lang="en"
+      className={`${geist.variable} ${geistMono.variable} ${lora.variable} dark`}
+    >
+      <body className="min-h-dvh h-dvh overflow-hidden bg-[#07080f] text-white antialiased">
+        {children}
       </body>
     </html>
   );

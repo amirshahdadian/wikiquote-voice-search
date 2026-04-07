@@ -1,8 +1,13 @@
-import LandingShell from "@/components/landing-shell";
+import MainShell from "@/components/main-shell";
 import { fetchRandomQuote, fetchUsers } from "@/lib/api";
 
-export default async function LandingPage() {
-  const [users, featuredQuote] = await Promise.all([fetchUsers(), fetchRandomQuote()]);
+export const dynamic = "force-dynamic";
 
-  return <LandingShell featuredQuote={featuredQuote} users={users} />;
+export default async function Page() {
+  const [users, randomQuote] = await Promise.all([
+    fetchUsers(),
+    fetchRandomQuote(),
+  ]);
+
+  return <MainShell initialUsers={users} initialQuote={randomQuote} />;
 }
