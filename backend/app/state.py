@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import random
 import re
 import tempfile
 import uuid
@@ -134,6 +135,9 @@ class BackendState:
         if len(audio_samples) < 3:
             raise ValueError("At least 3 audio samples are required")
 
+        # Auto-assign a unique Kokoro voice — not user-configurable.
+        preferences["style"] = self._assign_unique_voice()
+
         sample_paths = self._materialize_uploads(audio_samples)
         try:
             embedding = self.get_speaker_service().enroll_speaker(user_id, sample_paths)
@@ -144,6 +148,7 @@ class BackendState:
             create_user(user_id, Config.DB_PATH)
             save_user_profile(user_id, display_name, group_identifier, Config.DB_PATH)
             save_tts_preferences(user_id, preferences, Config.DB_PATH)
+            logger.info("Assigned Kokoro voice '%s' to user '%s'", preferences["style"], user_id)
             return self._compose_user_profile(user_id)
         finally:
             self._cleanup_paths(sample_paths)
@@ -580,6 +585,25 @@ class BackendState:
             "has_embedding": (self.settings.embeddings_dir / f"{user_id}.pkl").exists(),
             "preferences": preferences,
         }
+
+    def _assign_unique_voice(self) -> str:
+        """Pick a random Kokoro voice not yet assigned to any enrolled user.
+
+        Pulls the full voice list from TTSService so there is a single source
+        of truth.  If every voice is already taken (more users than voices)
+        any random voice is chosen instead.
+        """
+        from services.tts_service import KOKORO_VOICES
+
+        taken: set[str] = set()
+        for uid in self._all_known_user_ids():
+            prefs = get_tts_preferences(uid, Config.DB_PATH)
+            if prefs and prefs.get("style") in KOKORO_VOICES:
+                taken.add(prefs["style"])
+
+        available = [v for v in KOKORO_VOICES if v not in taken]
+        pool = available if available else list(KOKORO_VOICES)
+        return random.choice(pool)
 
     def _all_known_user_ids(self) -> list[str]:
         user_ids = {profile["user_id"] for profile in list_user_profiles(Config.DB_PATH)}

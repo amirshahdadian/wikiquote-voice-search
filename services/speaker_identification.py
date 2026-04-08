@@ -15,14 +15,36 @@ from __future__ import annotations
 import logging
 import os
 import pickle
-import tempfile
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import soundfile as sf
 
 from src.wikiquote_voice.config import Config
+
+# ── Silence noisy third-party import warnings ─────────────────────────────
+# webrtcvad (a resemblyzer dependency) still uses pkg_resources which is
+# scheduled for removal in Setuptools 81+.
+warnings.filterwarnings(
+    "ignore",
+    message=".*pkg_resources is deprecated.*",
+    category=UserWarning,
+)
+# librosa ≥ 0.10 deprecates the audioread fallback; suppress the
+# FutureWarning so it does not pollute server logs during WebM loading.
+warnings.filterwarnings(
+    "ignore",
+    message=".*__audioread_load.*",
+    category=FutureWarning,
+)
+# Also silence soundfile's "PySoundFile failed" user-warning that fires
+# for browser-recorded WebM/Opus files.
+warnings.filterwarnings(
+    "ignore",
+    message=".*PySoundFile failed.*",
+    category=UserWarning,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +100,26 @@ class SpeakerIdentificationService:
         """
         Load any audio file and return a resemblyzer-ready float32 waveform.
 
-        resemblyzer's preprocess_wav handles resampling to 16 kHz internally.
-        We keep a thin wrapper here so the rest of the class can call a
-        single method regardless of input format.
+        The browser records audio as WebM/Opus which soundfile cannot read.
+        We use librosa (which handles any format via its ffmpeg/audioread chain)
+        to decode first, then hand the numpy array to resemblyzer's
+        ``preprocess_wav`` for VAD trimming and normalisation.
+
+        All third-party warnings from this decode path are suppressed at
+        module level above.
         """
+        import librosa
         from resemblyzer import preprocess_wav
-        return preprocess_wav(Path(audio_path))
+
+        # Load at native sample rate, mono.  librosa handles WebM, Opus,
+        # MP4, WAV, MP3, FLAC — anything the browser might produce.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            wav_arr, sr = librosa.load(audio_path, sr=None, mono=True)
+
+        # preprocess_wav accepts a numpy array + source_sr; it resamples
+        # to 16 kHz and applies WebRTC VAD internally.
+        return preprocess_wav(wav_arr.astype(np.float32), source_sr=sr)
 
     # ------------------------------------------------------------------
     # Core: extract embedding
