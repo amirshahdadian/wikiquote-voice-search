@@ -196,7 +196,12 @@ class SpeakerIdentificationService:
         Because resemblyzer returns L2-normalised vectors the dot product
         equals cosine similarity exactly.  We clip to [0, 1] to avoid
         tiny numerical negatives.
+
+        Returns 0.0 if the embeddings have different dimensions (stale
+        embedding saved by a previous backend with a different vector size).
         """
+        if emb1.shape != emb2.shape:
+            return 0.0
         sim = float(np.dot(emb1 / np.linalg.norm(emb1), emb2 / np.linalg.norm(emb2)))
         return float(np.clip(sim, 0.0, 1.0))
 
@@ -276,7 +281,13 @@ class SpeakerIdentificationService:
             return pickle.load(fh)
 
     def load_all_embeddings(self, embeddings_dir: str) -> Dict[str, np.ndarray]:
-        """Load every *.pkl file in a directory as {stem: embedding}."""
+        """Load every *.pkl file in a directory as {stem: embedding}.
+
+        Embeddings saved by a previous backend (e.g. NeMo TitaNet = 192-dim)
+        are incompatible with resemblyzer (256-dim).  They are skipped with a
+        clear message so identification degrades gracefully rather than crashing.
+        """
+        _EXPECTED_DIM = 256
         directory = Path(embeddings_dir)
         users: Dict[str, np.ndarray] = {}
         if not directory.exists():
@@ -284,11 +295,20 @@ class SpeakerIdentificationService:
             return users
         for pkl in directory.glob("*.pkl"):
             try:
-                users[pkl.stem] = self.load_embedding(pkl)
-                logger.info("Loaded embedding for '%s'", pkl.stem)
+                emb = self.load_embedding(pkl)
+                if emb.shape != (_EXPECTED_DIM,):
+                    logger.warning(
+                        "Skipping stale embedding for '%s' — shape %s is "
+                        "incompatible with resemblyzer (%d-dim).  "
+                        "Please re-enroll this user.",
+                        pkl.stem, emb.shape, _EXPECTED_DIM,
+                    )
+                    continue
+                users[pkl.stem] = emb
+                logger.info("Loaded embedding for '%s' (shape %s)", pkl.stem, emb.shape)
             except Exception as exc:
                 logger.error("Failed to load '%s': %s", pkl.stem, exc)
-        logger.info("Loaded %d enrolled user(s)", len(users))
+        logger.info("Loaded %d valid enrolled user(s)", len(users))
         return users
 
 
