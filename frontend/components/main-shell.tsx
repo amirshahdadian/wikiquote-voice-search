@@ -13,13 +13,16 @@ import {
   RefreshCw,
   Search,
   Send,
+  Settings,
   Trash2,
   Upload,
   User,
+  Users,
   WifiOff,
   X,
   XCircle,
 } from "lucide-react";
+import Link from "next/link";
 import {
   useCallback,
   useEffect,
@@ -396,6 +399,16 @@ export default function MainShell({ initialUsers, initialQuote }: MainShellProps
               )}
             </AnimatePresence>
           </div>
+
+          {/* Manage users link */}
+          <Link
+            href="/users"
+            className="btn-secondary py-1.5 px-3 text-xs"
+            title="Manage enrolled users"
+          >
+            <Users size={13} />
+            <span className="hidden sm:block">Users</span>
+          </Link>
 
           {/* Add user button */}
           <button
