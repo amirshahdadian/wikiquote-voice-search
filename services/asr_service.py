@@ -107,8 +107,9 @@ class ASRService:
 
         decode_opts: Dict[str, Any] = {
             "fp16": True,
+            # mlx_whisper uses greedy decoding (temperature=0) — beam search
+            # is not yet implemented in the MLX backend.
             "temperature": 0.0,
-            "beam_size": 5,
             "initial_prompt": _INITIAL_PROMPT,
         }
         if language:
