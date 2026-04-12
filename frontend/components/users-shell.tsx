@@ -26,7 +26,14 @@ import {
   type ChangeEvent,
 } from "react";
 import type { UserProfile } from "@/lib/types";
-import { getApiBaseUrl, resolveApiUrl } from "@/lib/api";
+import {
+  createTtsPreview,
+  deleteUserProfile,
+  fetchUsers,
+  reEnrollUser,
+  registerUser,
+  resolveApiUrl,
+} from "@/lib/api";
 
 const cn = (...classes: (string | false | null | undefined)[]) =>
   classes.filter(Boolean).join(" ");
@@ -105,20 +112,18 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
   const [showAddUser, setShowAddUser] = useState(false);
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const apiBase = getApiBaseUrl();
 
   async function refreshUsers() {
     setIsLoading(true);
     try {
-      const res = await fetch(`${apiBase}/api/users`);
-      if (res.ok) setUsers(await res.json());
+      setUsers(await fetchUsers());
     } finally {
       setIsLoading(false);
     }
   }
 
   async function deleteUser(userId: string) {
-    await fetch(`${apiBase}/api/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+    await deleteUserProfile(userId);
     setUsers((prev) => prev.filter((u) => u.user_id !== userId));
     setDeleteTarget(null);
   }
@@ -131,16 +136,10 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
     }
     setPreviewingVoice(user.user_id);
     try {
-      const res = await fetch(`${apiBase}/api/tts/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: `Hello, my name is ${user.display_name}. This is my assigned voice.`,
-          user_id: user.user_id,
-        }),
+      const { audio_url } = await createTtsPreview({
+        text: `Hello, my name is ${user.display_name}. This is my assigned voice.`,
+        user_id: user.user_id,
       });
-      if (!res.ok) throw new Error();
-      const { audio_url } = await res.json();
       if (!audio_url) throw new Error();
       const url = resolveApiUrl(audio_url) ?? "";
       if (audioRef.current) {
@@ -343,7 +342,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
         {reEnrollTarget && (
           <ReEnrollModal
             user={reEnrollTarget}
-            apiBase={apiBase}
             onClose={() => setReEnrollTarget(null)}
             onSuccess={(updated) => {
               setUsers((prev) => prev.map((u) => u.user_id === updated.user_id ? updated : u));
@@ -357,7 +355,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
       <AnimatePresence>
         {showAddUser && (
           <AddUserModal
-            apiBase={apiBase}
             onClose={() => setShowAddUser(false)}
             onSuccess={(user) => {
               setUsers((prev) => [...prev, user]);
@@ -423,12 +420,10 @@ function ConfirmDeleteModal({
 // ── Re-enroll modal ────────────────────────────────────────────────────────────
 function ReEnrollModal({
   user,
-  apiBase,
   onClose,
   onSuccess,
 }: {
   user: UserProfile;
-  apiBase: string;
   onClose: () => void;
   onSuccess: (updated: UserProfile) => void;
 }) {
@@ -439,17 +434,13 @@ function ReEnrollModal({
         subtitle="Record 3 new voice samples to update the speaker embedding."
         onClose={onClose}
         onSubmit={async (samples) => {
-          const fd = new FormData();
-          samples.forEach((s) => {
-            const ext = s.blob.type.includes("webm") ? "webm" : "wav";
-            fd.append("audio_samples", s.blob, `${s.name}.${ext}`);
-          });
-          const res = await fetch(
-            `${apiBase}/api/users/${encodeURIComponent(user.user_id)}/re-enroll`,
-            { method: "POST", body: fd }
+          return reEnrollUser(
+            user.user_id,
+            samples.map((sample) => ({
+              blob: sample.blob,
+              name: `${sample.name}.${sample.blob.type.includes("webm") ? "webm" : "wav"}`,
+            }))
           );
-          if (!res.ok) throw new Error(await res.text());
-          return res.json();
         }}
         onSuccess={onSuccess}
       />
@@ -459,11 +450,9 @@ function ReEnrollModal({
 
 // ── Add user modal ─────────────────────────────────────────────────────────────
 function AddUserModal({
-  apiBase,
   onClose,
   onSuccess,
 }: {
-  apiBase: string;
   onClose: () => void;
   onSuccess: (user: UserProfile) => void;
 }) {
@@ -478,18 +467,16 @@ function AddUserModal({
         onClose={onClose}
         onSubmit={async (samples) => {
           if (!displayName.trim()) throw new Error("Name is required");
-          const fd = new FormData();
-          fd.append("display_name", displayName.trim());
-          fd.append("pitch_scale", "1.0");
-          fd.append("speaking_rate", "1.0");
-          fd.append("energy_scale", "1.0");
-          samples.forEach((s) => {
-            const ext = s.blob.type.includes("webm") ? "webm" : "wav";
-            fd.append("audio_samples", s.blob, `${s.name}.${ext}`);
+          return registerUser({
+            display_name: displayName.trim(),
+            pitch_scale: 1.0,
+            speaking_rate: 1.0,
+            energy_scale: 1.0,
+            audio_samples: samples.map((sample) => ({
+              blob: sample.blob,
+              name: `${sample.name}.${sample.blob.type.includes("webm") ? "webm" : "wav"}`,
+            })),
           });
-          const res = await fetch(`${apiBase}/api/users/register`, { method: "POST", body: fd });
-          if (!res.ok) throw new Error(await res.text());
-          return res.json();
         }}
         onSuccess={onSuccess}
       />

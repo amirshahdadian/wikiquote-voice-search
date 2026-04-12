@@ -1,0 +1,1 @@
+"""Canonical backend CLI entrypoints."""

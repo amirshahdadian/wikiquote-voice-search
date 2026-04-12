@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 import AudioRecorder from "@/components/audio-recorder";
 import QuoteResponseCard from "@/components/quote-response-card";
-import { getApiBaseUrl } from "@/lib/api";
+import { submitChatQuery, submitVoiceQuery } from "@/lib/api";
 import { ChatQueryResponse, LocalAudioSample, UserProfile, VoiceQueryResponse } from "@/lib/types";
 
 type HistoryEntry = {
@@ -66,23 +66,11 @@ export default function InteractionShell({ initialUsers }: InteractionShellProps
     setStatusText("Searching the graph and generating a response...");
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/chat/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: message.trim(),
-          conversation_id: conversationId ?? undefined,
-          selected_user_id: selectedUserId || undefined,
-        }),
+      const payload = await submitChatQuery({
+        message: message.trim(),
+        conversation_id: conversationId ?? undefined,
+        selected_user_id: selectedUserId || undefined,
       });
-
-      const payload = (await response.json()) as ChatQueryResponse | { detail?: string };
-      if (!response.ok) {
-        throw new Error("detail" in payload ? payload.detail ?? "Text query failed." : "Text query failed.");
-      }
-
       updateConversation(message.trim(), payload as ChatQueryResponse);
       setMessage("");
       setStatusText("Ready");
@@ -97,25 +85,12 @@ export default function InteractionShell({ initialUsers }: InteractionShellProps
     setStatusText("Transcribing, recognizing the speaker, searching, and generating audio...");
 
     try {
-      const formData = new FormData();
-      formData.append("audio", sample.blob, sample.name);
-      if (conversationId) {
-        formData.append("conversation_id", conversationId);
-      }
-      if (selectedUserId) {
-        formData.append("selected_user_id", selectedUserId);
-      }
-
-      const response = await fetch(`${getApiBaseUrl()}/api/voice/query`, {
-        method: "POST",
-        body: formData,
+      const payload = await submitVoiceQuery({
+        audio: sample.blob,
+        filename: sample.name,
+        conversation_id: conversationId,
+        selected_user_id: selectedUserId,
       });
-
-      const payload = (await response.json()) as VoiceQueryResponse | { detail?: string };
-      if (!response.ok) {
-        throw new Error("detail" in payload ? payload.detail ?? "Voice query failed." : "Voice query failed.");
-      }
-
       updateConversation((payload as VoiceQueryResponse).transcript, payload as VoiceQueryResponse);
       setStatusText("Ready");
     } catch (caught) {

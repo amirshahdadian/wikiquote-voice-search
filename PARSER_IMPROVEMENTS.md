@@ -3,7 +3,7 @@
 ## Overview
 
 This document describes the changes made to the Step 1 Wikiquote parsing pipeline
-(`scripts/parse_wikitext.py`, `config.py`). The goal was to bring a 1.3M-quote bloated
+(`backend/app/cli/ingest.py`, `backend/app/core/settings.py`). The goal was to bring a 1.3M-quote bloated
 corpus down to a high-quality, correctly-attributed dataset suitable for the autocomplete
 and voice search system.
 
@@ -81,13 +81,13 @@ used as the fallback `default_author`. This produced Author nodes like
 
 ## Changes Made
 
-### `config.py`
+### `backend/app/core/settings.py`
 - **`QUOTE_MIN_WORDS`: 3 → 5**
   Eliminates short filler lines that are not meaningful quotes.
 
 ---
 
-### `scripts/parse_wikitext.py`
+### `backend/app/cli/ingest.py`
 
 #### TV/Film: Taglines-Only Extraction
 ```

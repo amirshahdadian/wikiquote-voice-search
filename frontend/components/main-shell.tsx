@@ -12,6 +12,7 @@ import {
   MicOff,
   Plus,
   Quote,
+  Sparkles,
   Trash2,
   Upload,
   User,
@@ -31,11 +32,18 @@ import {
 } from "react";
 import type {
   ChatQueryResponse,
+  HealthStatus,
   UserPreferences,
   UserProfile,
   VoiceQueryResponse,
 } from "@/lib/types";
-import { getApiBaseUrl, resolveApiUrl } from "@/lib/api";
+import {
+  fetchHealth,
+  registerUser,
+  resolveApiUrl,
+  submitChatQuery,
+  submitVoiceQuery,
+} from "@/lib/api";
 import QuoteCard from "@/components/quote-card";
 import VoiceWaveform from "@/components/voice-waveform";
 
@@ -45,14 +53,6 @@ const cn = (...classes: (string | false | null | undefined)[]) =>
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type VoiceState = "idle" | "listening" | "processing";
-
-interface HealthStatus {
-  search: boolean;
-  asr: boolean;
-  speaker_id: boolean;
-  tts: boolean;
-  sqlite: boolean;
-}
 
 interface RecordedSample {
   id: string;
@@ -438,8 +438,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
-  const apiBase = getApiBaseUrl();
-
   // ── Auto-scroll on new messages ────────────────────────────────────────────
 
   useEffect(() => {
@@ -450,17 +448,12 @@ export default function MainShell({ initialUsers }: MainShellProps) {
 
   useEffect(() => {
     async function checkHealth() {
-      try {
-        const res = await fetch(`${apiBase}/api/health`);
-        if (res.ok) setHealth(await res.json());
-      } catch {
-        /* silently ignore */
-      }
+      setHealth(await fetchHealth());
     }
     checkHealth();
     const id = setInterval(checkHealth, 30_000);
     return () => clearInterval(id);
-  }, [apiBase]);
+  }, []);
 
   // ── Close dropdown on outside click ───────────────────────────────────────
 
@@ -518,17 +511,11 @@ export default function MainShell({ initialUsers }: MainShellProps) {
     setIsLoading(true);
 
     try {
-      const res = await fetch(`${apiBase}/api/chat/query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text.trim(),
-          conversation_id: conversationId,
-          selected_user_id: selectedUserId,
-        }),
+      const data = await submitChatQuery({
+        message: text.trim(),
+        conversation_id: conversationId,
+        selected_user_id: selectedUserId,
       });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data: ChatQueryResponse = await res.json();
       setConversationId(data.conversation_id);
       setMessages((prev) =>
         prev.map((m) =>
@@ -633,17 +620,12 @@ export default function MainShell({ initialUsers }: MainShellProps) {
 
     try {
       const ext = mimeType.includes("webm") ? "webm" : "ogg";
-      const formData = new FormData();
-      formData.append("audio", blob, `recording.${ext}`);
-      if (conversationId) formData.append("conversation_id", conversationId);
-      if (selectedUserId) formData.append("selected_user_id", selectedUserId);
-
-      const res = await fetch(`${apiBase}/api/voice/query`, {
-        method: "POST",
-        body: formData,
+      const data = await submitVoiceQuery({
+        audio: blob,
+        filename: `recording.${ext}`,
+        conversation_id: conversationId,
+        selected_user_id: selectedUserId,
       });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data: VoiceQueryResponse = await res.json();
       setConversationId(data.conversation_id);
 
       // Resolve user from recognized speaker if not pre-selected
@@ -787,6 +769,16 @@ export default function MainShell({ initialUsers }: MainShellProps) {
               )}
             </AnimatePresence>
           </div>
+
+          {/* Advanced features */}
+          <Link
+            href="/advanced"
+            className="btn-secondary py-1.5 px-3 text-xs"
+            title="Advanced search features"
+          >
+            <Sparkles size={13} />
+            <span className="hidden sm:block">Advanced</span>
+          </Link>
 
           {/* Manage users */}
           <Link
@@ -993,7 +985,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
       <AnimatePresence>
         {showRegister && (
           <RegisterModal
-            apiBase={apiBase}
             onClose={() => setShowRegister(false)}
             onSuccess={(user) => {
               setUsers((prev) => [...prev, user]);
@@ -1010,14 +1001,13 @@ export default function MainShell({ initialUsers }: MainShellProps) {
 // ── Register modal ─────────────────────────────────────────────────────────────
 
 interface RegisterModalProps {
-  apiBase: string;
   onClose: () => void;
   onSuccess: (user: UserProfile) => void;
 }
 
 type RegisterStep = "form" | "recording" | "submitting" | "done";
 
-function RegisterModal({ apiBase, onClose, onSuccess }: RegisterModalProps) {
+function RegisterModal({ onClose, onSuccess }: RegisterModalProps) {
   const [step, setStep] = useState<RegisterStep>("form");
   const [displayName, setDisplayName] = useState("");
   const [preferences, setPreferences] = useState<UserPreferences>({
@@ -1103,26 +1093,16 @@ function RegisterModal({ apiBase, onClose, onSuccess }: RegisterModalProps) {
     setStep("submitting");
 
     try {
-      const fd = new FormData();
-      fd.append("display_name", displayName.trim());
-      fd.append("pitch_scale", String(preferences.pitch_scale));
-      fd.append("speaking_rate", String(preferences.speaking_rate));
-      fd.append("energy_scale", String(preferences.energy_scale));
-      if (preferences.style) fd.append("style", preferences.style);
-      samples.forEach((s) => {
-        const ext = s.blob.type.includes("webm") ? "webm" : "wav";
-        fd.append("audio_samples", s.blob, `${s.name}.${ext}`);
+      const user = await registerUser({
+        display_name: displayName.trim(),
+        pitch_scale: preferences.pitch_scale,
+        speaking_rate: preferences.speaking_rate,
+        energy_scale: preferences.energy_scale,
+        audio_samples: samples.map((sample) => ({
+          blob: sample.blob,
+          name: `${sample.name}.${sample.blob.type.includes("webm") ? "webm" : "wav"}`,
+        })),
       });
-
-      const res = await fetch(`${apiBase}/api/users/register`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Server error ${res.status}`);
-      }
-      const user: UserProfile = await res.json();
       setStep("done");
       setTimeout(() => onSuccess(user), 900);
     } catch (err) {

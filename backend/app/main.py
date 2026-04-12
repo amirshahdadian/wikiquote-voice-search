@@ -2,35 +2,38 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers.audio import router as audio_router
-from .routers.chat import router as chat_router
-from .routers.health import router as health_router
-from .routers.quotes import router as quotes_router
-from .routers.users import router as users_router
-from .routers.voice import router as voice_router
-from .settings import settings
-from .state import BackendState
+from backend.app.api.routers.audio import router as audio_router
+from backend.app.api.routers.authors import router as authors_router
+from backend.app.api.routers.chat import router as chat_router
+from backend.app.api.routers.health import router as health_router
+from backend.app.api.routers.quotes import router as quotes_router
+from backend.app.api.routers.users import router as users_router
+from backend.app.api.routers.voice import router as voice_router
+from backend.app.container import AppContainer
+from backend.app.core.logging import configure_logging
+from backend.app.core.settings import settings
 
 
-def create_app(backend_state: Optional[BackendState] = None) -> FastAPI:
+def create_app(container: AppContainer | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if backend_state is not None:
-            app.state.backend = backend_state
+        configure_logging(settings.log_level)
+
+        if container is not None:
+            app.state.container = container
             yield
             return
 
-        state = BackendState(settings)
-        app.state.backend = state
+        app_container = AppContainer(settings)
+        app.state.container = app_container
         try:
             yield
         finally:
-            state.close()
+            app_container.close()
 
     app = FastAPI(
         title="Which Quote API",
@@ -48,6 +51,7 @@ def create_app(backend_state: Optional[BackendState] = None) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(quotes_router)
+    app.include_router(authors_router)
     app.include_router(users_router)
     app.include_router(chat_router)
     app.include_router(voice_router)

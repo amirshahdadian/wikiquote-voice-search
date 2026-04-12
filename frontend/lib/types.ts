@@ -1,3 +1,8 @@
+export type AuthorResult = {
+  author_name: string;
+  quote_count: number;
+};
+
 export type QuoteResult = {
   quote_text: string;
   author_name: string;
@@ -29,6 +34,14 @@ export type RecognizedUser = {
   source: string;
 };
 
+export type HealthStatus = {
+  search: boolean;
+  asr: boolean;
+  speaker_id: boolean;
+  tts: boolean;
+  sqlite: boolean;
+};
+
 export type ChatQueryResponse = {
   conversation_id: string;
   recognized_user?: RecognizedUser | null;
@@ -43,6 +56,11 @@ export type ChatQueryResponse = {
 export type VoiceQueryResponse = ChatQueryResponse & {
   transcript: string;
   normalized_transcript: string;
+};
+
+export type TTSPreviewResponse = {
+  audio_url?: string | null;
+  warnings: string[];
 };
 
 export type LocalAudioSample = {

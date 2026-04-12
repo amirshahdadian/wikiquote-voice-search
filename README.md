@@ -1,79 +1,91 @@
 # Wikiquote Voice Search
 
-Wikiquote Voice Search is a monorepo for the "Which Quote?" NLP project. It builds a Wikiquote graph in Neo4j, supports quote autocomplete and retrieval, and exposes both:
+Wikiquote Voice Search is the repository for the Master's degree Natural Language Processing course project **"Which Quote?"**. The project follows the two mandatory steps assigned in the course:
 
-- a modern web frontend with `Next.js`
-- a Python backend with `FastAPI`
+- **Step 1**: build a Wikiquote graph database from the official English Wikiquote dump, create a full-text citation index, and provide quote autocomplete with source attribution.
+- **Step 2**: build an interactive multi-user voice system on top of Step 1, with ASR, speaker identification, conversational querying, and personalized TTS responses.
 
-## Current Status
+This repository implements those requirements as a monorepo with:
 
-- Search pipeline: implemented and usable
-- FastAPI backend: implemented and usable
-- Next.js frontend: implemented as the new primary web interface
-- Voice add-ons: implemented but optional (some features require heavy dependencies like NeMo)
+- a `FastAPI` backend in Python
+- a `Next.js` frontend
+- a Neo4j-backed quote graph
 
-## Core Capabilities
+## Course Context
 
-- Parse Wikiquote XML with `mwparserfromhell`
-- Deduplicate and validate quote extraction
-- Populate Neo4j graph (`Author`, `Quote`, `Source`)
-- Full-text and multi-strategy quote search
-- Author search with typo-tolerant fallback
-- Chat-style quote query flow in FastAPI and Streamlit
-- Optional voice input/output:
-  - ASR: Whisper / NeMo / Wav2Vec2 hybrid routing
-  - Speaker ID: NeMo TitaNet embeddings
-  - TTS: NeMo FastPitch + HiFiGAN with gTTS fallback
+The professor's project brief requires all groups to implement both steps:
 
-## Repository Layout
+1. **Autocomplete over Wikiquote** using a graph database built from the official dump.
+2. **"Which Quote?" voice interaction** with:
+   - automatic speech recognition
+   - speaker recognition through stored voice embeddings
+   - a chatbot layer over the quote graph
+   - personalized text-to-speech
+
+The professor mentions technologies such as Whisper, Wav2Vec2, and NVIDIA NeMo as examples. In this implementation, equivalent pre-trained components were selected to fit the target hardware and environment:
+
+- ASR: `mlx-whisper`
+- Speaker identification: `resemblyzer`
+- TTS: `kokoro-onnx` with `gTTS` fallback
+
+## Current Repository Shape
 
 ```text
 wikiquote-voice-search/
 ├── backend/
-│   └── app/
-│       ├── main.py
-│       ├── routers/
-│       ├── schemas/
-│       └── state.py
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── routers/
+│   │   │   └── schemas/
+│   │   ├── cli/
+│   │   ├── core/
+│   │   ├── integrations/
+│   │   │   └── audio/
+│   │   ├── services/
+│   │   ├── container.py
+│   │   └── main.py
+│   └── tests/
 ├── frontend/
 │   ├── app/
 │   ├── components/
 │   ├── lib/
 │   └── tests/
+├── data/
+├── pyproject.toml
+├── pytest.ini
 ├── requirements.txt
-├── scripts/
-│   ├── check_neo4j.py
-│   ├── demo_autocomplete_tts.py
-│   ├── demo_hybrid_asr.py
-│   ├── parse_wikitext.py
-│   ├── populate_neo4j.py
-│   ├── create_index.py
-│   └── enroll_user.py
-├── services/
-│   ├── asr_service.py
-│   ├── asr_service_hybrid.py
-│   ├── chatbot_service.py
-│   ├── orchestrator.py
-│   ├── speaker_identification.py
-│   ├── tts_service.py
-│   └── tts_service_simple.py
-├── src/wikiquote_voice/
-│   ├── config.py
-│   ├── search/service.py
-│   ├── dialogue/
-│   └── storage/sqlite.py
-├── docs/
-│   └── AUTOCOMPLETE_TTS.md
-└── data/
+└── README.md
 ```
 
-## Prerequisites
+Notes:
 
-- Python 3.8+
-- Neo4j 5+
-- A valid `.env` file (copy from `.env.example`)
+- `backend/app/*` is the canonical Python backend.
+- operational CLI logic lives under `backend/app/cli/*`
+- the old `scripts/`, `services/`, and `src/` trees have been removed
+
+## Core Capabilities
+
+- Parse the official Wikiquote XML dump with `mwparserfromhell`
+- Extract, normalize, validate, and deduplicate quotes
+- Populate a Neo4j graph with `Author`, `Quote`, `QuoteOccurrence`, `Source`, and `Page`
+- Build full-text indexes for quote lookup and autocomplete
+- Support multi-strategy quote retrieval and author search
+- Provide a FastAPI API for chat, quote search, users, voice queries, TTS preview, and audio serving
+- Support multi-user voice interaction with:
+  - ASR via `mlx-whisper`
+  - speaker recognition via `resemblyzer`
+  - personalized TTS via `kokoro-onnx`
+
+## Requirements
+
+- Python `3.11+`
+- Node.js `20+` recommended
+- Neo4j `5+`
+- a valid `.env` file copied from `.env.example`
 
 ## Installation
+
+### Python
 
 ```bash
 git clone https://github.com/amirshahdadian/wikiquote-voice-search.git
@@ -84,10 +96,21 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` with your Neo4j credentials. For a local single-instance Neo4j Desktop
-or server setup on macOS, prefer `bolt://127.0.0.1:7687` over `neo4j://127.0.0.1:7687`.
+Optional editable install:
 
-### Frontend Setup
+```bash
+pip install -e ".[dev]"
+```
+
+This also exposes the canonical CLI entrypoints:
+
+```bash
+which-quote-ingest
+which-quote-maintenance
+which-quote-users
+```
+
+### Frontend
 
 ```bash
 cd frontend
@@ -95,101 +118,99 @@ npm install
 cd ..
 ```
 
-## Data Pipeline
+## Configuration
 
-### 1) Parse Wikiquote XML
+Edit `.env` with the Neo4j connection and any local overrides. Important values include:
+
+- `NEO4J_URI`
+- `NEO4J_USERNAME`
+- `NEO4J_PASSWORD`
+- `FRONTEND_ORIGINS`
+
+For a local Neo4j instance on macOS, `bolt://127.0.0.1:7687` is often simpler than `neo4j://127.0.0.1:7687`.
+
+## Step 1 Workflow
+
+### 1. Parse the Wikiquote dump
 
 ```bash
-python3 scripts/parse_wikitext.py
+python -m backend.app.cli.ingest
 ```
 
-### 2) Populate Neo4j
+or:
 
 ```bash
-python3 scripts/populate_neo4j.py
+which-quote-ingest
 ```
 
-### 3) Create Indexes
+### 2. Populate Neo4j
 
 ```bash
-python3 scripts/create_index.py
+python -m backend.app.cli.maintenance
 ```
 
-## Run the New Web App
+### 3. Create the Neo4j indexes
 
-### 1) Start the FastAPI backend
+```bash
+python -m backend.app.cli.maintenance --create-index
+```
+
+or:
+
+```bash
+which-quote-maintenance --create-index
+```
+
+## Step 2 Workflow
+
+### 1. Start the FastAPI backend
 
 ```bash
 source venv/bin/activate
 uvicorn backend.app.main:app --reload
 ```
 
-### 2) Start the Next.js frontend
+Interactive API docs:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### 2. Start the Next.js frontend
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-The frontend expects the API at `http://127.0.0.1:8000` by default. Override it with:
+The frontend expects the API at `http://127.0.0.1:8000` by default. Override it if needed:
 
 ```bash
 export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-## Run Search Service in CLI Mode
+### 3. Enroll users for speaker recognition and personalized TTS
 
 ```bash
-PYTHONPATH=src python3 -m wikiquote_voice.search.service --interactive
+python -m backend.app.cli.users
 ```
 
-## Voice Features (Optional)
-
-### ASR (works with Whisper by default)
+or:
 
 ```bash
-python3 scripts/demo_hybrid_asr.py
+which-quote-users
 ```
 
-### Speaker Identification + NeMo TTS
+## Testing
 
-Install NeMo only if you need these features (large dependency):
+### Backend
 
 ```bash
-pip install "nemo-toolkit[asr,tts]>=2.4,<3"
+python3 -m compileall backend
+pytest -q
 ```
 
-The NeMo-backed services now target NeMo 2.x model names by default:
-
-- `NEMO_TTS_SPEC_MODEL=tts_en_fastpitch`
-- `NEMO_TTS_VOCODER_MODEL=tts_en_hifigan`
-- `NEMO_SPEAKER_MODEL=titanet_large`
-- `NEMO_ASR_MODEL=stt_en_conformer_ctc_small`
-
-On Apple Silicon, `auto` now prefers `mps` for Whisper and Wav2Vec2 workloads, while
-NeMo-backed services stay on CPU by default.
-
-Enroll users:
-
-```bash
-python3 scripts/enroll_user.py
-```
-
-Run end-to-end voice orchestrator:
-
-```bash
-python3 services/orchestrator.py
-```
-
-## Testing Utilities
-
-```bash
-./venv/bin/python -m unittest discover -s tests -q
-python3 -m compileall backend src services tests
-python3 scripts/check_neo4j.py
-```
-
-### Frontend tests
+### Frontend
 
 ```bash
 cd frontend
@@ -197,11 +218,22 @@ npm run test
 npm run typecheck
 ```
 
+## Academic Deliverables
+
+According to the course instructions, the project delivery includes:
+
+- source code
+- a short written report
+- a live demo
+- a short presentation
+
+This repository contains the codebase; the written relation is in `REPORT.md`.
+
 ## Notes
 
-- `build_semantic_index()` in search service is currently a warmup hook and does not build an actual semantic index.
-- Relevance scores are strategy-dependent and not all are normalized to the same scale.
-- Generated response audio is served from `data/api_audio/` through `GET /api/audio/{audio_id}`.
+- `build_semantic_index()` is currently a warmup hook, not a full semantic vector index.
+- the primary TTS path is local (`kokoro-onnx`); the fallback path (`gTTS`) may require network access if used
+- generated response audio is served from `data/api_audio/` through `GET /api/audio/{audio_id}`
 
 ## License
 

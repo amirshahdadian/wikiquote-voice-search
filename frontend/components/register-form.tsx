@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 
 import SampleCollection from "@/components/sample-collection";
-import { getApiBaseUrl } from "@/lib/api";
+import { registerUser } from "@/lib/api";
 import { LocalAudioSample, UserProfile } from "@/lib/types";
 
 export default function RegisterForm() {
@@ -39,29 +39,14 @@ export default function RegisterForm() {
     setIsSubmitting(true);
 
     try {
-      const formData = new FormData();
-      formData.append("display_name", displayName.trim());
-      if (groupIdentifier.trim()) {
-        formData.append("group_identifier", groupIdentifier.trim());
-      }
-      formData.append("pitch_scale", pitchScale.toString());
-      formData.append("speaking_rate", speakingRate.toString());
-      formData.append("energy_scale", energyScale.toString());
-      for (const sample of samples) {
-        formData.append("audio_samples", sample.blob, sample.name);
-      }
-
-      const response = await fetch(`${getApiBaseUrl()}/api/users/register`, {
-        method: "POST",
-        body: formData,
+      const payload: UserProfile = await registerUser({
+        display_name: displayName.trim(),
+        group_identifier: groupIdentifier.trim() || undefined,
+        pitch_scale: pitchScale,
+        speaking_rate: speakingRate,
+        energy_scale: energyScale,
+        audio_samples: samples.map((sample) => ({ blob: sample.blob, name: sample.name })),
       });
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(payload?.detail ?? "Registration failed.");
-      }
-
-      const payload = (await response.json()) as UserProfile;
       setNotice(`Profile saved for ${payload.display_name}. Redirecting to the main app...`);
       router.push(`/app?user=${encodeURIComponent(payload.user_id)}`);
     } catch (caught) {

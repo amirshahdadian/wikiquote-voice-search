@@ -7,9 +7,8 @@ mwparserfromhell>=0.6.0
 fastapi>=0.100.0
 uvicorn[standard]>=0.23.0
 pydantic>=2.0.0
+pydantic-settings>=2.6.0
 python-multipart>=0.0.9
-streamlit>=1.32.0
-audio-recorder-streamlit>=0.0.8
 
 # Voice AI — ASR (Apple Silicon / mlx)
 # Runs natively on M-series GPU + Neural Engine via the MLX framework.

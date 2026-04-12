@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import SampleCollection from "@/components/sample-collection";
-import { fetchUser, getApiBaseUrl, resolveApiUrl } from "@/lib/api";
+import {
+  createTtsPreview,
+  deleteUserProfile,
+  fetchUser,
+  reEnrollUser,
+  resolveApiUrl,
+  updateUserPreferences,
+} from "@/lib/api";
 import { LocalAudioSample, UserPreferences, UserProfile } from "@/lib/types";
 
 type ProfileShellProps = {
@@ -57,18 +64,7 @@ export default function ProfileShell({ initialUsers }: ProfileShellProps) {
     setIsSaving(true);
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/users/${encodeURIComponent(selectedUserId)}/preferences`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(preferences),
-      });
-
-      const payload = (await response.json()) as UserProfile | { detail?: string };
-      if (!response.ok) {
-        throw new Error("detail" in payload ? payload.detail ?? "Could not save preferences." : "Could not save preferences.");
-      }
-
-      const updated = payload as UserProfile;
+      const updated = await updateUserPreferences(selectedUserId, preferences);
       setCurrentUser(updated);
       setUsers((current) => current.map((user) => (user.user_id === updated.user_id ? updated : user)));
       setMessage("Voice preferences updated.");
@@ -84,21 +80,11 @@ export default function ProfileShell({ initialUsers }: ProfileShellProps) {
     setMessage(null);
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/tts/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: previewText,
-          user_id: selectedUserId || undefined,
-          preferences,
-        }),
+      const payload = await createTtsPreview({
+        text: previewText,
+        user_id: selectedUserId || undefined,
+        preferences,
       });
-
-      const payload = (await response.json()) as { audio_url?: string | null; warnings?: string[]; detail?: string };
-      if (!response.ok) {
-        throw new Error(payload.detail ?? "Could not generate preview audio.");
-      }
-
       setPreviewUrl(resolveApiUrl(payload.audio_url) ?? null);
       setMessage(payload.warnings?.length ? payload.warnings.join(", ") : "Preview audio generated.");
     } catch (caught) {
@@ -120,22 +106,10 @@ export default function ProfileShell({ initialUsers }: ProfileShellProps) {
     setIsSaving(true);
 
     try {
-      const formData = new FormData();
-      for (const sample of reEnrollSamples) {
-        formData.append("audio_samples", sample.blob, sample.name);
-      }
-
-      const response = await fetch(`${getApiBaseUrl()}/api/users/${encodeURIComponent(selectedUserId)}/re-enroll`, {
-        method: "POST",
-        body: formData,
-      });
-
-      const payload = (await response.json()) as UserProfile | { detail?: string };
-      if (!response.ok) {
-        throw new Error("detail" in payload ? payload.detail ?? "Re-enrollment failed." : "Re-enrollment failed.");
-      }
-
-      const updated = payload as UserProfile;
+      const updated = await reEnrollUser(
+        selectedUserId,
+        reEnrollSamples.map((sample) => ({ blob: sample.blob, name: sample.name }))
+      );
       setCurrentUser(updated);
       setUsers((current) => current.map((user) => (user.user_id === updated.user_id ? updated : user)));
       setReEnrollSamples([]);
@@ -162,14 +136,7 @@ export default function ProfileShell({ initialUsers }: ProfileShellProps) {
     setIsSaving(true);
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/users/${encodeURIComponent(selectedUserId)}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(payload?.detail ?? "Delete failed.");
-      }
-
+      await deleteUserProfile(selectedUserId);
       const remainingUsers = users.filter((user) => user.user_id !== selectedUserId);
       setUsers(remainingUsers);
       setSelectedUserId(remainingUsers[0]?.user_id ?? "");
