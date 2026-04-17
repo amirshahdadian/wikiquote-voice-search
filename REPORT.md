@@ -6,7 +6,7 @@
 |---|---|
 | **Team** | Amir Hossein Shahdadian · Mahtab Taheri · Yasaman Zahedan |
 | **Project** | *Which Quote?* |
-| **Dataset** | English Wikiquote dump — `enwikiquote-20250601-pages-articles.xml` |
+| **Dataset** | English Wikiquote dump — `enwikiquote-20251120-pages-articles.xml` |
 | **Repository** | `wikiquote-voice-search` |
 
 ---
@@ -113,7 +113,7 @@ The backend is implemented under `backend/app/*`. The frontend communicates with
 
 The system starts from the official English Wikiquote XML dump:
 
-- `enwikiquote-20250601-pages-articles.xml`
+- `enwikiquote-20251120-pages-articles.xml`
 
 This dump is the raw source from which all graph data is derived.
 

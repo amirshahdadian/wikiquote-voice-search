@@ -227,7 +227,7 @@ According to the course instructions, the project delivery includes:
 - a live demo
 - a short presentation
 
-This repository contains the codebase; the written relation is in `REPORT.md`.
+This repository contains the codebase; the written report is in `REPORT.md`.
 
 ## Notes
 

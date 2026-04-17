@@ -97,7 +97,7 @@ export default function LandingShell({ users, featuredQuote }: LandingShellProps
           <div className="metric-card">
             <p className="text-lg font-bold font-headline text-ink">Voice recognition</p>
             <p className="mt-3 text-sm leading-6 text-scholarly-muted">
-              Recognize returning speakers from stored NeMo TitaNet embeddings and keep context user-aware.
+              Recognize returning speakers from stored voice embeddings and keep context user-aware.
             </p>
           </div>
           <div className="metric-card">

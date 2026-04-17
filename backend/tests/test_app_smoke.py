@@ -98,14 +98,14 @@ class StubContainer:
 
 
 def test_health_endpoint():
-    client = TestClient(create_app(container=StubContainer()))
-    response = client.get("/api/health")
+    with TestClient(create_app(container=StubContainer())) as client:
+        response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["search"] is True
 
 
 def test_chat_endpoint():
-    client = TestClient(create_app(container=StubContainer()))
-    response = client.post("/api/chat/query", json={"message": "find a quote about courage"})
+    with TestClient(create_app(container=StubContainer())) as client:
+        response = client.post("/api/chat/query", json={"message": "find a quote about courage"})
     assert response.status_code == 200
     assert response.json()["intent_type"] == "topic_search"

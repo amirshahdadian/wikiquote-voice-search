@@ -13,7 +13,7 @@ and voice search system.
 
 | Metric | Before | After |
 |--------|--------|-------|
-| Total quotes | 1,300,000 | **364,017** |
+| Total quotes | 1,300,000 | **381,134** *(latest full run)* |
 | `author == source` | ~tens of thousands | **326 (0.09%)** |
 | `source_locator == source` | widespread | **0** |
 | TV/film transcript quotes | ~500,000+ | **0** (taglines only) |
@@ -183,7 +183,11 @@ After:  Bullet quotes on theme pages are only emitted if they received at least
 
 ---
 
-## Final Corpus Breakdown
+## Historical Corpus Breakdown (Representative Run)
+
+The detailed per-page and per-type counts below are from a representative run used
+during parser-tuning iterations. On the latest full extraction run with the current
+pipeline, the total unique quote count is **381,134**.
 
 | Page type | Quote count | Notes |
 |-----------|-------------|-------|
