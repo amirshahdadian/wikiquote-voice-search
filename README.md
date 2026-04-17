@@ -229,6 +229,12 @@ According to the course instructions, the project delivery includes:
 
 This repository contains the codebase; the written report is in `REPORT.md`.
 
+## Contributors
+
+- Amir Hossein Shahdadian
+- Mahtab Taheri
+- Yasaman Zahedan
+
 ## Notes
 
 - `build_semantic_index()` is currently a warmup hook, not a full semantic vector index.
