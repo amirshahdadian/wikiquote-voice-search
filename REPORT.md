@@ -1,6 +1,6 @@
 # Which Quote? - Final Project Report
 
-**Natural Language Processing - Master's in Data Science**
+**Natural Language Processing - Data Science Master's degree**
 
 | | |
 |---|---|
