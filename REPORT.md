@@ -21,11 +21,9 @@ The final system is implemented as a full-stack application with a Python `FastA
 
 ## 1. Assignment Context
 
-The course project was defined in two mandatory stages for all student groups.
+The course project was defined in two mandatory stages.
 
 ### Step 1
-
-Students were asked to:
 
 - build a graph database containing Wikiquote
 - start from the official English Wikiquote dump
@@ -35,14 +33,14 @@ Students were asked to:
 
 ### Step 2
 
-Students were asked to build **"Which Quote?"**, an interactive system that allows multiple users to interact vocally with the results of Step 1. The required modules were:
+**"Which Quote?"**, an interactive system that allows multiple users to interact vocally with the results of Step 1. The required modules were:
 
 - an Automatic Speech Recognition module
 - a Speaker Identification module based on stored voice embeddings
 - a Chatbot module connected to the Wikiquote graph
 - a Personalized Text-to-Speech module
 
-The professor listed technologies such as Whisper, Wav2Vec2, and NVIDIA NeMo as example solutions. Our implementation uses equivalent pre-trained components chosen to match the project constraints and the available hardware:
+The project instructions list technologies such as Whisper, Wav2Vec2, and NVIDIA NeMo as example solutions. Our implementation uses equivalent pre-trained components chosen to match the project constraints and the available hardware:
 
 - **ASR**: `mlx-whisper`
 - **Speaker Identification**: `resemblyzer`
@@ -201,7 +199,7 @@ The speaker-identification module is implemented in:
 
 - `backend/app/integrations/audio/speaker_id.py`
 
-It uses `resemblyzer` to produce speaker embeddings. This directly matches the professor's instruction that fine-tuning is not required, and that it is sufficient to build a database of embeddings capable of distinguishing users.
+It uses `resemblyzer` to produce speaker embeddings. This directly matches the project instructions that fine-tuning is not required, and that it is sufficient to build a database of embeddings capable of distinguishing users.
 
 The registration path:
 
@@ -268,8 +266,6 @@ The main API route groups are:
 - `/api/audio`
 - `/api/health`
 
-This structure supports both the course requirements and a clean live demo setup.
-
 ---
 
 ## 7. Frontend
@@ -280,8 +276,6 @@ The frontend is implemented with `Next.js` and provides:
 - advanced quote-search views
 - user registration and management screens
 - voice interaction and response playback
-
-The frontend exists primarily to make the system easy to demonstrate during the presentation and to expose both project steps through a single consistent interface.
 
 ---
 
@@ -365,8 +359,6 @@ For that reason:
 - `resemblyzer` was selected for lightweight embedding-based speaker recognition
 - `kokoro-onnx` was selected for local text-to-speech without a GPU-specific runtime
 
-These choices are compatible with the spirit of the assignment because the requirement is to use pre-trained models for the specified NLP and speech tasks, not to use one mandatory implementation stack.
-
 ---
 
 ## 11. Limitations
@@ -374,7 +366,6 @@ These choices are compatible with the spirit of the assignment because the requi
 Although the system is complete and submission-ready, some limitations remain.
 
 - The quote-search layer is primarily lexical and heuristic, not semantic-RAG based.
-- `build_semantic_index()` currently behaves as a warmup hook rather than a full semantic vector index.
 - The fallback TTS path is less personalized than the main path.
 - The backend test suite is currently lightweight and focused on smoke validation rather than exhaustive coverage.
 
@@ -389,4 +380,4 @@ The final system satisfies both mandatory parts of the NLP course project:
 - **Step 1**: a Wikiquote graph with indexed autocomplete and attributable quote retrieval
 - **Step 2**: a multi-user voice interface with ASR, speaker recognition, conversational querying, and personalized TTS
 
-The resulting project is suitable for code delivery, written submission, live demo, and presentation. It combines information extraction, graph-based retrieval, speech technologies, and full-stack integration into a single coherent system aligned with the professor's assignment.
+It combines information extraction, graph-based retrieval, speech technologies, and full-stack integration into a single coherent system aligned with the project instructions.

@@ -1,6 +1,6 @@
 # Wikiquote Voice Search
 
-Wikiquote Voice Search is the repository for the Master's degree Natural Language Processing course project **"Which Quote?"**. The project follows the two mandatory steps assigned in the course:
+Wikiquote Voice Search is the repository for the Master's degree Natural Language Processing course project **"Which Quote?"**. The project follows the two mandatory steps assigned in the instructions:
 
 - **Step 1**: build a Wikiquote graph database from the official English Wikiquote dump, create a full-text citation index, and provide quote autocomplete with source attribution.
 - **Step 2**: build an interactive multi-user voice system on top of Step 1, with ASR, speaker identification, conversational querying, and personalized TTS responses.
@@ -13,7 +13,7 @@ This repository implements those requirements as a monorepo with:
 
 ## Course Context
 
-The professor's project brief requires all groups to implement both steps:
+The project instructions require to implement:
 
 1. **Autocomplete over Wikiquote** using a graph database built from the official dump.
 2. **"Which Quote?" voice interaction** with:
@@ -22,7 +22,7 @@ The professor's project brief requires all groups to implement both steps:
    - a chatbot layer over the quote graph
    - personalized text-to-speech
 
-The professor mentions technologies such as Whisper, Wav2Vec2, and NVIDIA NeMo as examples. In this implementation, equivalent pre-trained components were selected to fit the target hardware and environment:
+The project instructions mention technologies such as Whisper, Wav2Vec2, and NVIDIA NeMo as examples. In this implementation, equivalent pre-trained components were selected to fit the target hardware (That is a MacBook with Apple Sillicon processor) and environment:
 
 - ASR: `mlx-whisper`
 - Speaker identification: `resemblyzer`
@@ -96,12 +96,6 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Optional editable install:
-
-```bash
-pip install -e ".[dev]"
-```
-
 This also exposes the canonical CLI entrypoints:
 
 ```bash
@@ -125,7 +119,6 @@ Edit `.env` with the Neo4j connection and any local overrides. Important values 
 - `NEO4J_URI`
 - `NEO4J_USERNAME`
 - `NEO4J_PASSWORD`
-- `FRONTEND_ORIGINS`
 
 For a local Neo4j instance on macOS, `bolt://127.0.0.1:7687` is often simpler than `neo4j://127.0.0.1:7687`.
 
@@ -234,12 +227,6 @@ This repository contains the codebase; the written report is in `REPORT.md`.
 - Amir Hossein Shahdadian
 - Mahtab Taheri
 - Yasaman Zahedan
-
-## Notes
-
-- `build_semantic_index()` is currently a warmup hook, not a full semantic vector index.
-- the primary TTS path is local (`kokoro-onnx`); the fallback path (`gTTS`) may require network access if used
-- generated response audio is served from `data/api_audio/` through `GET /api/audio/{audio_id}`
 
 ## License
 
