@@ -1,12 +1,12 @@
-# Which Quote? — Final Project Report
+# Which Quote? - Final Project Report
 
-**Natural Language Processing — Master's Degree**
+**Natural Language Processing - Master's in Data Science**
 
 | | |
 |---|---|
 | **Team** | Amir Hossein Shahdadian · Mahtab Taheri · Yasaman Zahedan |
 | **Project** | *Which Quote?* |
-| **Dataset** | English Wikiquote dump — `enwikiquote-20251120-pages-articles.xml` |
+| **Dataset** | English Wikiquote dump - `enwikiquote-20251120-pages-articles.xml` |
 | **Repository** | `wikiquote-voice-search` |
 
 ---
@@ -105,7 +105,7 @@ The backend is implemented under `backend/app/*`. The frontend communicates with
 
 ---
 
-## 4. Step 1 — Wikiquote Graph and Autocomplete
+## 4. Step 1 - Wikiquote Graph and Autocomplete
 
 ## 4.1 Data Source
 
@@ -172,7 +172,7 @@ The result is a Step 1 system that does not merely store Wikiquote in Neo4j, but
 
 ---
 
-## 5. Step 2 — Interactive Voice System
+## 5. Step 2 - Interactive Voice System
 
 Step 2 extends the Step 1 graph into an interactive spoken interface.
 

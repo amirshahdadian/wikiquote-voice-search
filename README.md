@@ -1,6 +1,6 @@
 # Wikiquote Voice Search
 
-Wikiquote Voice Search is the repository for the Master's degree Natural Language Processing course project **"Which Quote?"**. The project follows the two mandatory steps assigned in the instructions:
+Wikiquote Voice Search is the repository for the Master's in Data Science Natural Language Processing course project **"Which Quote?"**. The project follows the two mandatory steps assigned in the instructions:
 
 - **Step 1**: build a Wikiquote graph database from the official English Wikiquote dump, create a full-text citation index, and provide quote autocomplete with source attribution.
 - **Step 2**: build an interactive multi-user voice system on top of Step 1, with ASR, speaker identification, conversational querying, and personalized TTS responses.
