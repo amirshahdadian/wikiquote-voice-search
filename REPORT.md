@@ -137,6 +137,30 @@ The extraction pipeline performs:
 
 Each extracted record carries structured fields such as quote text, author, source, page title, page type, normalized text, quote fingerprint, and occurrence key.
 
+Representative parser code:
+
+```python
+# backend/app/cli/ingest.py
+@dataclass
+class ExtractedQuote:
+    quote: str
+    author: str
+    page_title: str
+    page_type: str
+    source: Optional[str] = None
+    normalized_quote: Optional[str] = None
+    quote_fingerprint: Optional[str] = None
+    occurrence_key: Optional[str] = None
+
+def _canonicalize_text(self, text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text or "")
+    normalized = normalized.replace("’", "'").replace("“", '"').replace("”", '"')
+    normalized = normalized.lower()
+    normalized = re.sub(r'\s+', ' ', normalized)
+    normalized = re.sub(r'^[\'"“”‘’«»\-\s]+|[\'"“”‘’«»\-\s]+$', '', normalized)
+    return normalized.strip()
+```
+
 ## 4.3 Graph Construction
 
 The extracted data is inserted into Neo4j through the maintenance pipeline implemented in:
@@ -152,6 +176,28 @@ The graph model uses the following node categories:
 - `Page`
 
 This design allows one canonical quotation to be connected to multiple occurrences and contexts without duplicating the quote text itself.
+
+Representative Neo4j loading code:
+
+```cypher
+// backend/app/cli/maintenance.py
+MERGE (quote:Quote {fingerprint: quote_data.quote_fingerprint})
+  ON CREATE SET
+    quote.text = quote_data.quote,
+    quote.canonical_text = coalesce(quote_data.canonical_quote, quote_data.quote),
+    quote.normalized_text = coalesce(quote_data.normalized_quote, quote_data.canonical_quote, quote_data.quote),
+    quote.primary_author = author_name,
+    quote.primary_source = source_title,
+    quote.primary_page = quote_data.page_title
+
+MERGE (occurrence:QuoteOccurrence {key: quote_data.occurrence_key})
+  ON CREATE SET
+    occurrence.author_name = author_name,
+    occurrence.source_title = source_title,
+    occurrence.page_title = quote_data.page_title,
+    occurrence.quote_type = quote_data.quote_type,
+    occurrence.is_primary = occurrence_is_primary
+```
 
 ## 4.4 Indexing and Search
 
@@ -169,6 +215,27 @@ The search implementation is centered in:
 - `backend/app/services/quote_search.py`
 
 The result is a Step 1 system that does not merely store Wikiquote in Neo4j, but actively supports quote completion and attribution.
+
+Representative search logic:
+
+```python
+# backend/app/integrations/neo4j_quotes.py
+def search_quotes(self, query: str, limit: int = 10, include_fuzzy: bool = True) -> List[Dict[str, Any]]:
+    if not query or not query.strip():
+        return []
+
+    query = " ".join(query.strip().split())
+    theme_match = re.match(r"^quotes?\s+(?:about|on|regarding)\s+(.+)$", query, re.IGNORECASE)
+    if theme_match:
+        return self.search_by_theme(theme_match.group(1).strip(), limit=limit)
+
+    if self._looks_like_partial_quote(query):
+        return self._partial_quote_search(query, limit)
+
+    results = self._run_search_pipeline(query, limit, include_fuzzy=include_fuzzy)
+    results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+    return results[:limit]
+```
 
 ---
 
@@ -193,6 +260,29 @@ The ASR output includes:
 - the raw transcript
 - a normalized transcript for downstream intent handling
 
+Representative ASR code:
+
+```python
+# backend/app/integrations/audio/asr.py
+def transcribe(self, audio_path: str, language: Optional[str] = None) -> Dict[str, Any]:
+    decode_opts = {
+        "fp16": True,
+        "temperature": 0.0,
+        "initial_prompt": _INITIAL_PROMPT,
+    }
+    if language:
+        decode_opts["language"] = language
+
+    result = mlx_whisper.transcribe(
+        audio_path,
+        path_or_hf_repo=self.model_name,
+        verbose=False,
+        **decode_opts,
+    )
+    text = result["text"].strip()
+    return {"text": text, "normalized_text": self.normalize_command(text)}
+```
+
 ## 5.2 Speaker Identification
 
 The speaker-identification module is implemented in:
@@ -213,6 +303,28 @@ The recognition path:
 - compares it against enrolled users
 - returns the highest-scoring match above a configured threshold
 
+Representative speaker-identification code:
+
+```python
+# backend/app/integrations/audio/speaker_id.py
+def identify_speaker(self, audio_path: str, enrolled_users: Dict[str, np.ndarray]) -> Tuple[Optional[str], float]:
+    if not enrolled_users:
+        return None, 0.0
+
+    query = self.extract_embedding(audio_path)
+    best_id, best_score = None, 0.0
+
+    for uid, enrolled_emb in enrolled_users.items():
+        score = self.compute_similarity(query, enrolled_emb)
+        if score > best_score:
+            best_score = score
+            best_id = uid
+
+    if best_score >= self.threshold:
+        return best_id, best_score
+    return None, best_score
+```
+
 ## 5.3 Conversational Layer
 
 The conversational module is implemented in:
@@ -228,6 +340,26 @@ This layer is responsible for:
 
 The approach is rule-based and deterministic, which is appropriate for the narrow task domain of quote lookup and follow-up handling.
 
+Representative orchestration code:
+
+```python
+# backend/app/services/conversation.py
+def process_voice_query(self, audio_bytes: bytes, filename: str, conversation_id: str | None = None,
+                        selected_user_id: str | None = None) -> dict[str, Any]:
+    conversation = self._get_or_create_conversation(conversation_id)
+    transcript, normalized_transcript = self.voice_service.transcribe_bytes(audio_bytes, filename)
+
+    if selected_user_id:
+        recognized_user = self.user_service.load_recognized_user(selected_user_id, 1.0, "selected")
+    else:
+        matched_user, confidence = self.voice_service.identify_speaker(audio_bytes, filename)
+        recognized_user = self.user_service.load_recognized_user(matched_user, confidence, "speaker_id") if matched_user else None
+
+    response = self._build_query_response(transcript, conversation, selected_user_id, recognized_user, [])
+    response.update({"conversation_id": conversation.conversation_id, "transcript": transcript})
+    return response
+```
+
 ## 5.4 Personalized Text-to-Speech
 
 The TTS modules are implemented in:
@@ -238,6 +370,29 @@ The TTS modules are implemented in:
 The main TTS engine is `kokoro-onnx`. A per-user voice profile is associated with each registered speaker, allowing different users to hear different synthesized voices. This satisfies the Step 2 requirement that responses should be personalized according to the recognized user's associated voice preferences.
 
 If the primary TTS path is unavailable, the system exposes a fallback TTS path.
+
+Representative personalization code:
+
+```python
+# backend/app/integrations/audio/tts.py
+def synthesize_personalized(self, text: str, user_id: str = None, output_path: str = None,
+                            preferences: Dict[str, Any] = None) -> np.ndarray:
+    if preferences is None:
+        preferences = self.get_user_preferences(user_id) if user_id else self._default_preferences()
+
+    voice = str(preferences.get("style") or DEFAULT_VOICE)
+    speed = float(preferences.get("speaking_rate") or DEFAULT_SPEED)
+    energy = float(preferences.get("energy_scale") or 1.0)
+
+    if voice not in KOKORO_VOICES and not voice.startswith(("af_", "am_", "bf_", "bm_")):
+        voice = DEFAULT_VOICE
+
+    audio, sr = self._synth(text, voice=voice, speed=speed)
+    audio = np.clip(audio * energy, -1.0, 1.0)
+    if output_path:
+        sf.write(output_path, audio, sr)
+    return audio
+```
 
 ---
 
@@ -266,6 +421,31 @@ The main API route groups are:
 - `/api/audio`
 - `/api/health`
 
+Representative backend wiring:
+
+```python
+# backend/app/container.py
+speaker_service = SpeakerIdentificationService(threshold=0.75)
+self.quote_search = QuoteSearchService(app_settings)
+self.voice = VoiceService(app_settings, speaker_service=speaker_service)
+self.users = UserService(app_settings, speaker_service=speaker_service)
+self.conversation = ConversationService(
+    self.quote_search,
+    self.users,
+    self.voice,
+    app_settings.conversation_history_limit,
+)
+
+# backend/app/main.py
+app.include_router(health_router)
+app.include_router(quotes_router)
+app.include_router(authors_router)
+app.include_router(users_router)
+app.include_router(chat_router)
+app.include_router(voice_router)
+app.include_router(audio_router)
+```
+
 ---
 
 ## 7. Frontend
@@ -276,6 +456,35 @@ The frontend is implemented with `Next.js` and provides:
 - advanced quote-search views
 - user registration and management screens
 - voice interaction and response playback
+
+Representative frontend integration code:
+
+```typescript
+// frontend/lib/api.ts
+export async function submitVoiceQuery(payload: {
+  audio: Blob;
+  filename?: string;
+  conversation_id?: string | null;
+  selected_user_id?: string | null;
+}): Promise<VoiceQueryResponse> {
+  const formData = new FormData();
+  formData.append("audio", payload.audio, payload.filename ?? "recording.webm");
+  if (payload.conversation_id) formData.append("conversation_id", payload.conversation_id);
+  if (payload.selected_user_id) formData.append("selected_user_id", payload.selected_user_id);
+  return requestJson<VoiceQueryResponse>("/api/voice/query", { method: "POST", body: formData });
+}
+
+// frontend/components/interaction-shell.tsx
+async function sendVoiceQuery(sample: LocalAudioSample) {
+  const payload = await submitVoiceQuery({
+    audio: sample.blob,
+    filename: sample.name,
+    conversation_id: conversationId,
+    selected_user_id: selectedUserId,
+  });
+  updateConversation((payload as VoiceQueryResponse).transcript, payload as VoiceQueryResponse);
+}
+```
 
 ---
 
@@ -299,6 +508,29 @@ Used for:
 - user profiles
 - TTS preferences
 - local metadata for registered users
+
+Representative SQLite schema:
+
+```sql
+-- backend/app/integrations/sqlite_users.py
+CREATE TABLE IF NOT EXISTS user_tts_preferences (
+    user_id TEXT PRIMARY KEY,
+    pitch_scale REAL DEFAULT 1.0,
+    speaking_rate REAL DEFAULT 1.0,
+    energy_scale REAL DEFAULT 1.0,
+    style TEXT DEFAULT 'neutral',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    group_identifier TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
 ### Filesystem Storage
 
