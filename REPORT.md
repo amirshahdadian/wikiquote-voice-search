@@ -96,7 +96,7 @@ The final system is organized as a monorepo with a canonical Python backend and 
 │   Speaker ID (resemblyzer)                                  │
 │   TTS (kokoro-onnx + fallback)                              │
 └──────────────────────────────┬──────────────────────────────┘
-                               │ Bolt / Neo4j
+                               │ Neo4j
 ┌──────────────────────────────▼──────────────────────────────┐
 │                     Neo4j Graph Database                    │
 │   Author · Quote · QuoteOccurrence · Source · Page         │

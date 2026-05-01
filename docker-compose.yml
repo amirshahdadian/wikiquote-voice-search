@@ -1,0 +1,39 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: wikiquote-voice-search-backend:local
+    environment:
+      ASR_BACKEND: ${ASR_BACKEND:-faster}
+      ASR_MODEL_NAME: ${ASR_MODEL_NAME:-Systran/faster-whisper-small}
+      ASR_DEVICE: ${ASR_DEVICE:-cpu}
+      ASR_COMPUTE_TYPE: ${ASR_COMPUTE_TYPE:-int8}
+      ASR_BEAM_SIZE: ${ASR_BEAM_SIZE:-5}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000"]}
+      NEO4J_URI: ${NEO4J_URI:-neo4j+s://your-aura-instance.databases.neo4j.io}
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-change-me}
+      NEO4J_DATABASE: ${NEO4J_DATABASE:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATA_DIR: /app/data
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    image: wikiquote-voice-search-frontend:local
+    environment:
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:

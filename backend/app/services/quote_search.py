@@ -13,6 +13,7 @@ class QuoteSearchService:
             app_settings.neo4j_uri,
             app_settings.neo4j_username,
             app_settings.neo4j_password,
+            app_settings.neo4j_database,
         )
         self._repository.connect()
         self._repository.build_semantic_index(sample_size=10000)
@@ -26,4 +27,3 @@ class QuoteSearchService:
 
     def __getattr__(self, name: str):
         return getattr(self._repository, name)
-

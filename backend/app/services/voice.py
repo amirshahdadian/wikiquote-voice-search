@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.core.settings import Settings
-from backend.app.integrations.audio import ASRService, SimpleTTSService, SpeakerIdentificationService, TTSService
+from backend.app.integrations.audio import (
+    ASRProvider,
+    SimpleTTSService,
+    SpeakerIdentificationService,
+    TTSService,
+    create_asr_provider,
+    is_backend_available,
+)
 
 
 class VoiceService:
@@ -18,7 +25,7 @@ class VoiceService:
         self,
         app_settings: Settings,
         speaker_service: SpeakerIdentificationService | None = None,
-        asr_service: ASRService | None = None,
+        asr_service: ASRProvider | None = None,
         tts_service: TTSService | None = None,
         tts_fallback: SimpleTTSService | None = None,
     ):
@@ -34,9 +41,15 @@ class VoiceService:
         return self._speaker_service
 
     @property
-    def asr_service(self) -> ASRService:
+    def asr_service(self) -> ASRProvider:
         if self._asr_service is None:
-            self._asr_service = ASRService()
+            self._asr_service = create_asr_provider(
+                backend=self.settings.asr_backend,
+                model_name=self.settings.asr_model_name,
+                device=self.settings.asr_device,
+                compute_type=self.settings.asr_compute_type,
+                beam_size=self.settings.asr_beam_size,
+            )
         return self._asr_service
 
     @property
@@ -54,7 +67,7 @@ class VoiceService:
     def health_flags(self, search_ready: bool) -> dict[str, bool]:
         return {
             "search": search_ready,
-            "asr": importlib.util.find_spec("mlx_whisper") is not None,
+            "asr": is_backend_available(self.settings.asr_backend),
             "speaker_id": importlib.util.find_spec("resemblyzer") is not None,
             "tts": (
                 importlib.util.find_spec("kokoro_onnx") is not None
@@ -147,4 +160,3 @@ class VoiceService:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             temp_file.write(payload)
             return temp_file.name
-

@@ -127,7 +127,6 @@ Edit `.env` with the Neo4j connection and any local overrides. Important values 
 - `NEO4J_PASSWORD`
 - `FRONTEND_ORIGINS`
 
-For a local Neo4j instance on macOS, `bolt://127.0.0.1:7687` is often simpler than `neo4j://127.0.0.1:7687`.
 
 ## Step 1 Workflow
 

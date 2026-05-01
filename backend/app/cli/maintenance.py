@@ -13,11 +13,12 @@ from backend.app.core.settings import settings
 logger = logging.getLogger(__name__)
 
 class Neo4jPopulator:
-    def __init__(self, uri: str, username: str, password: str):
+    def __init__(self, uri: str, username: str, password: str, database: str | None = None):
         """Initialize Neo4j connection."""
         self.uri = uri
         self.username = username
         self.password = password
+        self.database = database
         self.driver = None
         
     def connect(self):
@@ -25,7 +26,7 @@ class Neo4jPopulator:
         try:
             self.driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
             # Test the connection
-            with self.driver.session() as session:
+            with self.session() as session:
                 session.run("RETURN 1")
             logger.info("Successfully connected to Neo4j database")
         except AuthError:
@@ -43,10 +44,18 @@ class Neo4jPopulator:
         if self.driver:
             self.driver.close()
             logger.info("Neo4j connection closed")
+
+    def session(self):
+        """Open a session against the configured Neo4j database, if provided."""
+        if self.driver is None:
+            raise RuntimeError("Neo4j driver is not connected")
+        if self.database:
+            return self.driver.session(database=self.database)
+        return self.driver.session()
     
     def clear_database(self):
         """Clear all nodes and relationships from the database in small batches."""
-        with self.driver.session() as session:
+        with self.session() as session:
             deleted = 1
             total = 0
             while deleted > 0:
@@ -74,7 +83,7 @@ class Neo4jPopulator:
             "CREATE CONSTRAINT occurrence_key_unique IF NOT EXISTS FOR (o:QuoteOccurrence) REQUIRE o.key IS UNIQUE",
         ]
         
-        with self.driver.session() as session:
+        with self.session() as session:
             for constraint in constraints:
                 try:
                     session.run(constraint)
@@ -100,7 +109,7 @@ class Neo4jPopulator:
         """Process a batch of quotes."""
         logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} quotes)")
         
-        with self.driver.session() as session:
+        with self.session() as session:
             # Cypher query to create nodes and relationships
             query = """
             UNWIND $quotes AS quote_data
@@ -246,7 +255,7 @@ class Neo4jPopulator:
     
     def get_database_stats(self) -> Dict[str, int]:
         """Get statistics about the populated database."""
-        with self.driver.session() as session:
+        with self.session() as session:
             stats = {}
             
             # Count nodes
@@ -298,7 +307,11 @@ def build_search_indexes() -> None:
         auth=(settings.neo4j_username, settings.neo4j_password),
     )
     try:
-        with driver.session() as session:
+        if settings.neo4j_database:
+            session_context = driver.session(database=settings.neo4j_database)
+        else:
+            session_context = driver.session()
+        with session_context as session:
             session.run("RETURN 1")
             fulltext_indexes = [
                 (
@@ -367,7 +380,12 @@ def main():
         return
 
     # Initialize Neo4j populator using config
-    populator = Neo4jPopulator(settings.neo4j_uri, settings.neo4j_username, settings.neo4j_password)
+    populator = Neo4jPopulator(
+        settings.neo4j_uri,
+        settings.neo4j_username,
+        settings.neo4j_password,
+        settings.neo4j_database,
+    )
 
     try:
         # Connect to database

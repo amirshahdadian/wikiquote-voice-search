@@ -1,0 +1,9 @@
+.git
+.next
+node_modules
+venv
+coverage
+.env
+.env.*
+Dockerfile
+npm-debug.log*

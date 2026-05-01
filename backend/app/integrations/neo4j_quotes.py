@@ -19,11 +19,12 @@ class QuoteSearchService:
     PRIMARY_PAGE_TYPES = ("person", "literary_work")
     PRIMARY_QUOTE_TYPES = ("sourced", "template", "blockquote")
 
-    def __init__(self, uri: str, username: str, password: str):
+    def __init__(self, uri: str, username: str, password: str, database: str | None = None):
         """Initialize the search service with Neo4j connection."""
         self.uri = uri
         self.username = username
         self.password = password
+        self.database = database
         self.driver = None
         
     def connect(self):
@@ -96,6 +97,14 @@ class QuoteSearchService:
         if self.driver:
             self.driver.close()
             logger.info("Neo4j connection closed")
+
+    def session(self):
+        """Open a session against the configured Neo4j database, if provided."""
+        if self.driver is None:
+            raise RuntimeError("Neo4j driver is not connected")
+        if self.database:
+            return self.driver.session(database=self.database)
+        return self.driver.session()
     
     def build_semantic_index(self, sample_size: int = 10000):
         """
@@ -348,7 +357,7 @@ class QuoteSearchService:
         """
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(
                     cypher_query,
                     search_normalized=normalized_query,
@@ -428,7 +437,7 @@ class QuoteSearchService:
         """
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(
                     cypher_query,
                     search_query=search_query,
@@ -482,7 +491,7 @@ class QuoteSearchService:
         """
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(
                     cypher_query,
                     limit=limit,
@@ -528,7 +537,7 @@ class QuoteSearchService:
         """
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(
                     cypher_query,
                     search_query=normalized_query,
@@ -588,7 +597,7 @@ class QuoteSearchService:
         """
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(cypher_query, author_query=author_query, limit=limit)
                 quotes = [dict(record) for record in result]
                 
@@ -638,7 +647,7 @@ class QuoteSearchService:
         """
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(cypher_query, author_query=author_query, limit=limit)
                 return [dict(record) for record in result]
         except Exception as e:
@@ -678,7 +687,7 @@ class QuoteSearchService:
         """
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(cypher_query, search_terms=search_terms, limit=limit)
                 quotes = [dict(record) for record in result]
                 
@@ -701,7 +710,7 @@ class QuoteSearchService:
         """
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(cypher_query, limit=limit)
                 return [dict(record) for record in result]
         except Exception as e:
@@ -741,7 +750,7 @@ class QuoteSearchService:
             params = {}
         
         try:
-            with self.driver.session() as session:
+            with self.session() as session:
                 result = session.run(cypher_query, **params)
                 record = result.single()
                 return dict(record) if record else None

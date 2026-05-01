@@ -1,11 +1,12 @@
 """Application settings loaded from environment and .env files."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -18,7 +19,7 @@ class Settings(BaseSettings):
     )
 
     api_prefix: str = "/api"
-    frontend_origins: list[str] = Field(
+    frontend_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
     conversation_history_limit: int = 8
@@ -26,11 +27,18 @@ class Settings(BaseSettings):
     neo4j_uri: str = "neo4j://127.0.0.1:7687"
     neo4j_username: str = "neo4j"
     neo4j_password: str = "neo4j"
+    neo4j_database: str | None = None
 
     batch_size: int = 1000
     search_limit: int = 5
     log_level: str = "INFO"
     parse_page_limit: int | None = None
+
+    asr_backend: str = "mlx"
+    asr_model_name: str | None = None
+    asr_device: str = "auto"
+    asr_compute_type: str | None = None
+    asr_beam_size: int = 5
 
     data_dir: Path = Path("data")
     artifacts_dir: Path = Path("artifacts")
@@ -53,8 +61,19 @@ class Settings(BaseSettings):
         if value is None or value == "":
             return ["http://localhost:3000", "http://127.0.0.1:3000"]
         if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("["):
+                return json.loads(stripped)
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @field_validator("asr_backend")
+    @classmethod
+    def _validate_asr_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"mlx", "faster"}:
+            raise ValueError("ASR_BACKEND must be one of: mlx, faster")
+        return normalized
 
     @property
     def resolved_recordings_dir(self) -> Path:
