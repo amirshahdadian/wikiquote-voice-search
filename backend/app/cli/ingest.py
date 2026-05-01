@@ -237,6 +237,26 @@ class MWParserQuoteExtractor:
         self.max_sentences = settings.quote_max_sentences
         self.min_alpha_ratio = settings.quote_min_alpha_ratio
 
+    def _normalize_wikilink_target(self, target: str) -> str:
+        """Normalize a wikilink target to a human-readable page title."""
+        cleaned = (target or "").strip()
+        if not cleaned:
+            return ""
+        cleaned = cleaned.split("#", 1)[0].strip()
+        if ":" in cleaned:
+            prefix, remainder = cleaned.split(":", 1)
+            if prefix.lower() in {"w", "wikipedia", "q", "wikiquote"}:
+                cleaned = remainder.strip()
+        return cleaned.replace("_", " ").strip()
+
+    def _wikilink_display_text(self, link: Any) -> str:
+        """Return the most useful human-readable text for a wikilink node."""
+        label = self._clean_quote_text(str(getattr(link, "text", "") or ""))
+        if label:
+            return label
+        target = self._normalize_wikilink_target(str(getattr(link, "title", "") or ""))
+        return self._clean_quote_text(target)
+
     def _canonicalize_text(self, text: str) -> str:
         """Normalize text for deduplication and stable keys."""
         normalized = unicodedata.normalize("NFKC", text or "")
@@ -684,22 +704,32 @@ class MWParserQuoteExtractor:
 
     def _infer_author_from_intro(self, intro: str, lead_wikitext: str) -> Optional[str]:
         """Infer a work author from the lead section when the page is about a work."""
-        linked_author = re.search(
-            r'\bby\s+(?:the\s+[a-z -]{0,40}\s+)?\[\[(?:[^|\]]+\|)?([^\]]+)\]\]',
-            lead_wikitext,
-            re.IGNORECASE,
-        )
-        if linked_author:
-            candidate = self._clean_quote_text(linked_author.group(1))
-            if self._looks_like_person_name(candidate):
-                return candidate
+        linked_patterns = [
+            r'by\s+(?:[0-9a-z][0-9a-z .,&-]{0,80}\s+)?\[\[(?:[^|\]]+\|)?([^\]]+)\]\]',
+            r'\[\[(?:[^|\]]+\|)?([^\]]+)\]\]\'s\b',
+        ]
+        for pattern in linked_patterns:
+            linked_author = re.search(pattern, lead_wikitext, re.IGNORECASE)
+            if linked_author:
+                candidate = self._clean_quote_text(linked_author.group(1))
+                if self._looks_like_person_name(candidate):
+                    return candidate
 
         plain_author = re.search(
-            r'\bby\s+(?:the\s+[a-z -]{0,40}\s+)?([A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+){0,4})\b',
+            r'\bby\s+(?:[0-9a-z][0-9a-z .,&-]{0,80}\s+)?([A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+){0,5})\b',
             intro,
         )
         if plain_author:
             candidate = self._clean_quote_text(plain_author.group(1).strip(" ,.;:"))
+            if self._looks_like_person_name(candidate):
+                return candidate
+
+        possessive_author = re.search(
+            r'\b([A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+){0,5})\'s\s+(?:[A-Z][^.!?]{0,120}\b)?(?:novel|book|play|poem|story|volume|collection|anthology|treatise|essay|dialogue|tragedy|comedy)\b',
+            intro,
+        )
+        if possessive_author:
+            candidate = self._clean_quote_text(possessive_author.group(1).strip(" ,.;:"))
             if self._looks_like_person_name(candidate):
                 return candidate
 
@@ -1362,32 +1392,97 @@ class MWParserQuoteExtractor:
         """
         if not text:
             return None
-        
-        text = self._clean_quote_text(text)
-        if not text:
+
+        raw_text = text
+        cleaned_text = self._clean_quote_text(text)
+        if not cleaned_text:
             return None
-        
+
         author = None
         work = None
         locator = None
         year = None
-        
+
+        try:
+            wikicode = mwparserfromhell.parse(raw_text)
+            wikilinks = [
+                self._wikilink_display_text(link)
+                for link in wikicode.filter_wikilinks()
+            ]
+        except Exception:
+            wikilinks = []
+
         # Extract year
-        year_match = re.search(r'\b(1[0-9]{3}|20[0-2][0-9])\b', text)
+        year_match = re.search(r'\b(1[0-9]{3}|20[0-2][0-9])\b', cleaned_text)
         if year_match:
             year = year_match.group(1)
-        
+
+        if wikilinks:
+            link_iter = iter(wikilinks)
+            for candidate in link_iter:
+                if self._looks_like_person_name(candidate):
+                    author = candidate
+                    break
+            if author:
+                for candidate in link_iter:
+                    if candidate != author and not self._looks_like_person_name(candidate):
+                        work = candidate
+                        break
+
+        author_prefix_match = re.match(
+            r'^\s*([A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\'’-]+){0,5})(?:,\s*(Jr\.?|Sr\.?|II|III|IV|V))?,\s*(.+)$',
+            cleaned_text,
+        )
+        trailing_text = cleaned_text
+        if author_prefix_match:
+            candidate = author_prefix_match.group(1).strip()
+            suffix = author_prefix_match.group(2)
+            if suffix:
+                candidate = f"{candidate}, {suffix.strip()}"
+            if len(candidate.split()) >= 2 and self._looks_like_person_name(candidate):
+                author = author or candidate
+                trailing_text = author_prefix_match.group(3).strip()
+
+        # Extract work title from italics (common for book titles)
+        italic_match = re.search(r"''([^']+)''", raw_text)
+        if italic_match and not work:
+            work = self._clean_quote_text(italic_match.group(1)).rstrip(" ,.;:")
+
+        # Extract work title from quotes
+        work_match = re.search(r'["""]([^"""]+)["""]', cleaned_text)
+        if work_match and not work:
+            work = self._clean_quote_text(work_match.group(1)).rstrip(" ,.;:")
+
+        if author and not work:
+            locator_boundary = re.search(
+                r',\s*(?=(?:Act|Scene|Book|Chapter|Part|Episode|Season|line|lines)\b)',
+                trailing_text,
+                re.IGNORECASE,
+            )
+            work_chunk = trailing_text
+            if locator_boundary:
+                work_chunk = trailing_text[: locator_boundary.start()].strip()
+            work_chunk = re.split(r'\s*;\s*', work_chunk, maxsplit=1)[0].strip()
+            work_chunk = re.sub(r'\([^)]*\d{4}[^)]*\)', '', work_chunk).strip(" ,.;:-")
+            if work_chunk:
+                if not re.match(
+                    r'^(?:speech|address|interview|letter|lecture|sermon|remarks?|statement|quoted by|quoted in|reported in|from)\b',
+                    work_chunk,
+                    re.IGNORECASE,
+                ):
+                    work = work or work_chunk
+
         # Try attribution patterns
         for pattern in self.attribution_patterns:
-            match = pattern.search(text)
+            match = pattern.search(cleaned_text)
             if match:
                 groups = match.groups()
                 if groups[0]:
                     # Could be author or work title
                     potential = groups[0].strip()
-                    if self._looks_like_person_name(potential):
+                    if not author and self._looks_like_person_name(potential):
                         author = potential
-                    else:
+                    elif not work:
                         work = potential
                 if len(groups) > 1 and groups[1]:
                     if not author:
@@ -1397,33 +1492,23 @@ class MWParserQuoteExtractor:
                         if year_match:
                             year = year_match.group()
                 break
-        
-        # Extract work title from quotes
-        work_match = re.search(r'["""]([^"""]+)["""]', text)
-        if work_match and not work:
-            work = work_match.group(1)
-        
-        # Extract work title from italics (common for book titles)
-        italic_match = re.search(r"''([^']+)''", text)
-        if italic_match and not work:
-            work = italic_match.group(1)
 
         locator_match = re.search(
-            r'\b((?:Act|Scene|Book|Chapter|Part|Episode|Season)\s+[A-Za-z0-9.\-]+(?:,\s*(?:Scene|line|lines)\s+[A-Za-z0-9.\-–]+)?)',
-            text,
+            r'\b((?:(?:Act|Scene|Book|Chapter|Part|Episode|Season)\s+[^,;]+|(?:line|lines)\s+[A-Za-z0-9.\-–]+)(?:,\s*(?:(?:Act|Scene|Book|Chapter|Part|Episode|Season)\s+[^,;]+|(?:line|lines)\s+[A-Za-z0-9.\-–]+))*)',
+            cleaned_text,
             re.IGNORECASE,
         )
         if locator_match:
             locator = self._clean_quote_text(locator_match.group(1))
-        
+
         # If we found attribution markers but no author, check if line looks like attribution
         if not author and not work:
             # Check for common attribution starters
             starters = ['from', 'in', 'letter to', 'interview', 'speech', 'address']
-            text_lower = text.lower()
+            text_lower = cleaned_text.lower()
             if any(text_lower.startswith(s) for s in starters):
-                work = text
-        
+                work = cleaned_text
+
         if author or work or locator or year:
             return (author, work, locator, year)
         
@@ -1486,12 +1571,13 @@ class MWParserQuoteExtractor:
             'quotes', 'quotations', 'attributed', 'sourced', 'disputed',
             'misattributed', 'about', 'external', 'links', 'see', 'also',
             'references', 'bibliography', 'notes', 'interview', 'speech',
-            'letter', 'from', 'the', 'season', 'series', 'episode',
+            'letter', 'from', 'season', 'series', 'episode',
             'act', 'scene', 'book', 'chapter', 'part'
         ]
         
         text_lower = text.lower()
-        if any(word in text_lower for word in non_name_words):
+        text_words = set(re.findall(r"[a-z]+", text_lower))
+        if any(word in text_words for word in non_name_words):
             return False
         
         # Check for year patterns (likely not a name)
