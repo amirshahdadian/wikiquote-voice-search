@@ -25,6 +25,7 @@ from dataclasses import dataclass, asdict
 
 from backend.app.core.logging import configure_logging
 from backend.app.core.settings import settings
+from backend.app.search_normalization import normalize_search_text
 
 logger = logging.getLogger(__name__)
 
@@ -247,11 +248,7 @@ class MWParserQuoteExtractor:
 
     def _normalize_search_text(self, text: str) -> str:
         """Normalize text for punctuation-insensitive matching and quote fingerprints."""
-        normalized = unicodedata.normalize("NFKD", text or "")
-        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
-        normalized = normalized.lower().replace("&", " and ")
-        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
-        return " ".join(normalized.split())
+        return normalize_search_text(text)
 
     def _looks_like_decade_bucket(self, text: Optional[str]) -> bool:
         """Return whether a heading is only a decade/time bucket."""
