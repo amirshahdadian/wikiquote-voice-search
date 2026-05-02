@@ -19,7 +19,7 @@ class QuoteSearchService:
     PRIMARY_PAGE_TYPES = ("person", "literary_work")
     PRIMARY_QUOTE_TYPES = ("sourced", "template", "blockquote")
     MIN_SEARCHABLE_QUOTE_LENGTH = 15
-    MAX_SEARCHABLE_QUOTE_LENGTH = 500
+    MAX_SEARCHABLE_QUOTE_LENGTH = 800
 
     def __init__(self, uri: str, username: str, password: str):
         """Initialize the search service with Neo4j connection."""

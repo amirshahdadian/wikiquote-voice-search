@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     xml_file: Path = Path("enwikiquote-20250601-pages-articles.xml")
 
     quote_min_length: int = 15
-    quote_max_length: int = 500
+    quote_max_length: int = 800
     quote_min_words: int = 5
     quote_max_words: int = 120
     quote_max_sentences: int = 6
