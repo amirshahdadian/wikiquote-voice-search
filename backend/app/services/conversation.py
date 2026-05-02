@@ -301,7 +301,7 @@ class ConversationService:
             return f'The best matching quote is "{quote_text}" by {author} from {source}.'
         if intent_type == "follow_up_alternative":
             return f'Here is another quote: "{quote_text}" by {author} from {source}.'
-        return f'Here is a quote about {query_label}: "{quote_text}" by {author} from {source}.'
+        return f'"{quote_text}" by {author} from {source}.'
 
     def _get_or_create_conversation(self, conversation_id: str | None) -> ConversationState:
         if conversation_id and conversation_id in self.conversations:

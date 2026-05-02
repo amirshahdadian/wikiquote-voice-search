@@ -1,10 +1,10 @@
 import logging
 import re
-import unicodedata
 from typing import List, Dict, Any, Optional
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
 from backend.app.core.settings import settings
+from backend.app.search_normalization import normalize_search_text, search_text_variants, APOSTROPHE_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,8 @@ class QuoteSearchService:
     }
     PRIMARY_PAGE_TYPES = ("person", "literary_work")
     PRIMARY_QUOTE_TYPES = ("sourced", "template", "blockquote")
+    MIN_SEARCHABLE_QUOTE_LENGTH = 15
+    MAX_SEARCHABLE_QUOTE_LENGTH = 800
 
     def __init__(self, uri: str, username: str, password: str):
         """Initialize the search service with Neo4j connection."""
@@ -116,11 +118,11 @@ class QuoteSearchService:
 
     def _normalize_search_text(self, text: str) -> str:
         """Normalize text for punctuation-insensitive quote matching."""
-        normalized = unicodedata.normalize("NFKD", text or "")
-        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
-        normalized = normalized.lower().replace("&", " and ")
-        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
-        return " ".join(normalized.split())
+        return normalize_search_text(text)
+
+    def _search_text_variants(self, text: str) -> List[str]:
+        """Return canonical and backward-compatible normalized query variants."""
+        return search_text_variants(text)
     
     def search_quotes(self, query: str, limit: int = 10, include_fuzzy: bool = True) -> List[Dict[str, Any]]:
         """
@@ -148,7 +150,10 @@ class QuoteSearchService:
         
         if is_partial_quote:
             logger.info(f"Detected partial quote search: '{query}'")
-            return self._partial_quote_search(query, limit)
+            partial_results = self._partial_quote_search(query, limit)
+            if partial_results:
+                return partial_results
+            logger.info("Partial quote path returned no matches for '%s'; falling back to full pipeline", query)
         
         results = self._run_search_pipeline(query, limit, include_fuzzy=include_fuzzy)
         results.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
@@ -259,15 +264,103 @@ class QuoteSearchService:
 
     def _partial_quote_search_in_scope(self, query: str, limit: int, scope: str) -> List[Dict[str, Any]]:
         """Search partial quotes within a specific quality scope."""
+        results: List[Dict[str, Any]] = []
+        internal_limit = max(limit * 5, 25)
+        for normalized_query in self._search_text_variants(query):
+            remaining = internal_limit - len(results)
+            if remaining <= 0:
+                break
+            results = self._merge_unique_results(
+                results,
+                self._partial_quote_search_variant_in_scope(query, normalized_query, remaining, scope),
+                internal_limit,
+            )
+        return self._rerank_partial_quote_results(query, results, limit)
+
+    def _normalize_phrase_match_text(self, text: str) -> str:
+        """Normalize text for phrase-contiguity checks while preserving punctuation gaps."""
+        normalized = text or ""
+        for char in APOSTROPHE_CHARS:
+            normalized = normalized.replace(char, "'")
+        normalized = normalized.lower().replace("&", " and ")
+        normalized = re.sub(r"(?<=[a-z0-9])'+(?=[a-z0-9])", "", normalized)
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip()
+
+    def _phrase_match_rank(self, query: str, quote_text: str) -> int:
+        """
+        Prefer contiguous word-sequence matches over punctuation-interrupted ones.
+
+        Rank meanings:
+        4 = exact query tokens at the start, separated only by whitespace
+        3 = exact query tokens later, separated only by whitespace
+        2 = query tokens at the start but interrupted by punctuation
+        1 = query tokens later but interrupted by punctuation
+        0 = no phrase-level match
+        """
+        query_tokens = self._normalize_search_text(query).split()
+        if len(query_tokens) < 2:
+            return 0
+
+        normalized_quote = self._normalize_phrase_match_text(quote_text)
+        if not normalized_quote:
+            return 0
+
+        strict_pattern = r"\b" + r"\s+".join(re.escape(token) for token in query_tokens) + r"\b"
+        loose_pattern = r"\b" + r"(?:[\s\W]+)".join(re.escape(token) for token in query_tokens) + r"\b"
+
+        strict_match = re.search(strict_pattern, normalized_quote, re.IGNORECASE)
+        if strict_match:
+            return 4 if strict_match.start() == 0 else 3
+
+        loose_match = re.search(loose_pattern, normalized_quote, re.IGNORECASE)
+        if loose_match:
+            return 2 if loose_match.start() == 0 else 1
+
+        return 0
+
+    def _rerank_partial_quote_results(
+        self,
+        query: str,
+        results: List[Dict[str, Any]],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Re-rank partial results to favor contiguous phrase matches."""
+        ranked: List[Dict[str, Any]] = []
+        for result in results:
+            enriched = dict(result)
+            enriched["_phrase_match_rank"] = self._phrase_match_rank(query, result.get("quote_text", ""))
+            ranked.append(enriched)
+
+        ranked.sort(
+            key=lambda item: (
+                item.get("_phrase_match_rank", 0),
+                item.get("relevance_score", 0),
+                -item.get("quote_length", 0),
+            ),
+            reverse=True,
+        )
+
+        for item in ranked:
+            item.pop("_phrase_match_rank", None)
+
+        return ranked[:limit]
+
+    def _partial_quote_search_variant_in_scope(
+        self,
+        query: str,
+        normalized_query: str,
+        limit: int,
+        scope: str,
+    ) -> List[Dict[str, Any]]:
+        """Search partial quotes within a specific quality scope for one normalized variant."""
         page_type_multiplier_case = self._page_type_multiplier_case()
         scope_condition = self._scope_condition(scope)
-        normalized_query = self._normalize_search_text(query)
 
         cypher_query = f"""
-        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
-        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
-        WHERE {scope_condition}
-          AND coalesce(quote.normalized_text, quote.canonical_text, quote.text) CONTAINS $search_normalized
+        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)
+        OPTIONAL MATCH (occurrence)-[:CITED_AS]->(source:Source)
+        OPTIONAL MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
 
         WITH quote, occurrence, author, source,
              coalesce(quote.normalized_text, quote.canonical_text, quote.text) AS normalized_quote,
@@ -275,7 +368,10 @@ class QuoteSearchService:
              size(quote.text) AS quote_length,
              size($search_normalized) AS query_length
 
-        WHERE quote_length >= 15 AND quote_length <= 320
+        WHERE {scope_condition}
+          AND normalized_quote CONTAINS query_normalized
+          AND quote_length >= {self.MIN_SEARCHABLE_QUOTE_LENGTH}
+          AND quote_length <= {self.MAX_SEARCHABLE_QUOTE_LENGTH}
 
         WITH quote, occurrence, author, source, quote_length, query_length, normalized_quote, query_normalized,
              size(split(normalized_quote, query_normalized)[0]) AS prefix_gap
@@ -334,8 +430,8 @@ class QuoteSearchService:
              END AS match_position
 
         RETURN DISTINCT quote.text AS quote_text,
-               author.name AS author_name,
-               source.title AS source_title,
+               coalesce(author.name, quote.primary_author, occurrence.author_name, 'Unknown author') AS author_name,
+               coalesce(source.title, quote.primary_source, occurrence.source_title, quote.primary_page, 'Unknown source') AS source_title,
                occurrence.page_type AS page_type,
                occurrence.quote_type AS quote_type,
                ((position_score + length_bonus + completion_bonus + coverage_bonus + prefix_bonus + quote_type_bonus + source_bonus) * page_type_multiplier) / 100.0 AS relevance_score,
@@ -366,8 +462,26 @@ class QuoteSearchService:
     
     def _fulltext_search(self, query: str, limit: int, scope: str = "primary") -> List[Dict[str, Any]]:
         """Full-text search using Neo4j indexes tuned for the requested corpus scope."""
-        normalized_query = self._normalize_search_text(query)
-        search_query = self._prepare_fulltext_query(normalized_query or query)
+        results: List[Dict[str, Any]] = []
+        for normalized_query in self._search_text_variants(query):
+            remaining = limit - len(results)
+            if remaining <= 0:
+                break
+            results = self._merge_unique_results(
+                results,
+                self._fulltext_search_variant(normalized_query, remaining, scope),
+                limit,
+            )
+        return results
+
+    def _fulltext_search_variant(
+        self,
+        normalized_query: str,
+        limit: int,
+        scope: str = "primary",
+    ) -> List[Dict[str, Any]]:
+        """Full-text search for a single normalized query variant."""
+        search_query = self._prepare_fulltext_query(normalized_query)
         page_type_multiplier_case = self._page_type_multiplier_case()
         scope_condition = self._scope_condition(scope)
         index_name = self._fulltext_index_name(scope)
@@ -376,8 +490,9 @@ class QuoteSearchService:
         CALL db.index.fulltext.queryNodes('{index_name}', $search_query)
         YIELD node AS quote, score
 
-        MATCH (quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
-        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        MATCH (quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)
+        OPTIONAL MATCH (occurrence)-[:CITED_AS]->(source:Source)
+        OPTIONAL MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
 
         WHERE {scope_condition}
 
@@ -386,7 +501,7 @@ class QuoteSearchService:
              size(quote.text) AS quote_length,
              size($normalized_query) AS query_length
 
-        WHERE quote_length >= 15 AND quote_length <= 320
+        WHERE quote_length >= {self.MIN_SEARCHABLE_QUOTE_LENGTH} AND quote_length <= {self.MAX_SEARCHABLE_QUOTE_LENGTH}
 
         WITH quote, occurrence, author, source, normalized_quote, quote_length, query_length,
              score * CASE 
@@ -415,8 +530,8 @@ class QuoteSearchService:
              END * {page_type_multiplier_case} AS adjusted_score
 
         RETURN DISTINCT quote.text AS quote_text,
-               author.name AS author_name,
-               source.title AS source_title,
+               coalesce(author.name, quote.primary_author, occurrence.author_name, 'Unknown author') AS author_name,
+               coalesce(source.title, quote.primary_source, occurrence.source_title, quote.primary_page, 'Unknown source') AS source_title,
                occurrence.page_type AS page_type,
                occurrence.quote_type AS quote_type,
                adjusted_score AS relevance_score,
@@ -432,7 +547,7 @@ class QuoteSearchService:
                 result = session.run(
                     cypher_query,
                     search_query=search_query,
-                    normalized_query=normalized_query or query.lower(),
+                    normalized_query=normalized_query,
                     limit=limit,
                     scope=scope,
                     primary_page_types=list(self.PRIMARY_PAGE_TYPES),
@@ -445,9 +560,23 @@ class QuoteSearchService:
     
     def _keyword_search(self, query: str, limit: int, scope: str = "primary") -> List[Dict[str, Any]]:
         """Keyword-based search for individual words in the query."""
-        keywords = self._extract_keywords(query)
-        if not keywords:
-            return []
+        results: List[Dict[str, Any]] = []
+        for variant in self._search_text_variants(query):
+            keywords = self._extract_keywords(variant)
+            if not keywords:
+                continue
+            remaining = limit - len(results)
+            if remaining <= 0:
+                break
+            results = self._merge_unique_results(
+                results,
+                self._keyword_search_variant(keywords, remaining, scope),
+                limit,
+            )
+        return results
+
+    def _keyword_search_variant(self, keywords: List[str], limit: int, scope: str = "primary") -> List[Dict[str, Any]]:
+        """Keyword-based search for one normalized keyword list."""
         page_type_multiplier_case = self._page_type_multiplier_case()
         scope_condition = self._scope_condition(scope)
         
@@ -462,13 +591,14 @@ class QuoteSearchService:
         where_clause = " AND ".join(conditions)
         
         cypher_query = f"""
-        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
-        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)
+        OPTIONAL MATCH (occurrence)-[:CITED_AS]->(source:Source)
+        OPTIONAL MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
         WHERE {scope_condition} AND {where_clause}
         
         RETURN DISTINCT quote.text AS quote_text,
-               author.name AS author_name,
-               source.title AS source_title,
+               coalesce(author.name, quote.primary_author, occurrence.author_name, 'Unknown author') AS author_name,
+               coalesce(source.title, quote.primary_source, occurrence.source_title, quote.primary_page, 'Unknown source') AS source_title,
                occurrence.page_type AS page_type,
                occurrence.quote_type AS quote_type,
                0.75
@@ -498,13 +628,32 @@ class QuoteSearchService:
     
     def _fuzzy_search(self, query: str, limit: int, scope: str = "primary") -> List[Dict[str, Any]]:
         """Fuzzy search using similarity matching."""
+        results: List[Dict[str, Any]] = []
+        for normalized_query in self._search_text_variants(query):
+            remaining = limit - len(results)
+            if remaining <= 0:
+                break
+            results = self._merge_unique_results(
+                results,
+                self._fuzzy_search_variant(normalized_query, remaining, scope),
+                limit,
+            )
+        return results
+
+    def _fuzzy_search_variant(
+        self,
+        normalized_query: str,
+        limit: int,
+        scope: str = "primary",
+    ) -> List[Dict[str, Any]]:
+        """Fuzzy search using a single normalized query variant."""
         page_type_multiplier_case = self._page_type_multiplier_case()
         scope_condition = self._scope_condition(scope)
-        normalized_query = self._normalize_search_text(query)
         
         cypher_query = f"""
-        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
-        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        MATCH (quote:Quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)
+        OPTIONAL MATCH (occurrence)-[:CITED_AS]->(source:Source)
+        OPTIONAL MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
         WHERE {scope_condition}
         
         // Calculate similarity based on common words
@@ -513,8 +662,8 @@ class QuoteSearchService:
         WHERE size(common_words) > 0
         
         RETURN DISTINCT quote.text AS quote_text,
-               author.name AS author_name,
-               source.title AS source_title,
+               coalesce(author.name, quote.primary_author, occurrence.author_name, 'Unknown author') AS author_name,
+               coalesce(source.title, quote.primary_source, occurrence.source_title, quote.primary_page, 'Unknown source') AS source_title,
                occurrence.page_type AS page_type,
                occurrence.quote_type AS quote_type,
                (toFloat(size(common_words)) / size(split($search_query, ' ')))
@@ -662,15 +811,16 @@ class QuoteSearchService:
         CALL db.index.fulltext.queryNodes('quote_fulltext_index', $search_terms)
         YIELD node AS quote, score
 
-        MATCH (quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)-[:CITED_AS]->(source:Source)
-        MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
+        MATCH (quote)-[:HAS_OCCURRENCE]->(occurrence:QuoteOccurrence)
+        OPTIONAL MATCH (occurrence)-[:CITED_AS]->(source:Source)
+        OPTIONAL MATCH (occurrence)-[:ATTRIBUTED_TO]->(author:Author)
 
         WITH quote, occurrence, author, source, score,
              score * {page_type_multiplier_case} AS adjusted_score
 
         RETURN DISTINCT quote.text AS quote_text,
-               author.name AS author_name,
-               source.title AS source_title,
+               coalesce(author.name, quote.primary_author, occurrence.author_name, 'Unknown author') AS author_name,
+               coalesce(source.title, quote.primary_source, occurrence.source_title, quote.primary_page, 'Unknown source') AS source_title,
                adjusted_score AS relevance_score
         
         ORDER BY adjusted_score DESC
