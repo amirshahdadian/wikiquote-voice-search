@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
 from backend.app.core.settings import settings
-from backend.app.search_normalization import normalize_search_text, search_text_variants
+from backend.app.search_normalization import normalize_search_text, search_text_variants, APOSTROPHE_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -265,16 +265,86 @@ class QuoteSearchService:
     def _partial_quote_search_in_scope(self, query: str, limit: int, scope: str) -> List[Dict[str, Any]]:
         """Search partial quotes within a specific quality scope."""
         results: List[Dict[str, Any]] = []
+        internal_limit = max(limit * 5, 25)
         for normalized_query in self._search_text_variants(query):
-            remaining = limit - len(results)
+            remaining = internal_limit - len(results)
             if remaining <= 0:
                 break
             results = self._merge_unique_results(
                 results,
                 self._partial_quote_search_variant_in_scope(query, normalized_query, remaining, scope),
-                limit,
+                internal_limit,
             )
-        return results
+        return self._rerank_partial_quote_results(query, results, limit)
+
+    def _normalize_phrase_match_text(self, text: str) -> str:
+        """Normalize text for phrase-contiguity checks while preserving punctuation gaps."""
+        normalized = text or ""
+        for char in APOSTROPHE_CHARS:
+            normalized = normalized.replace(char, "'")
+        normalized = normalized.lower().replace("&", " and ")
+        normalized = re.sub(r"(?<=[a-z0-9])'+(?=[a-z0-9])", "", normalized)
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip()
+
+    def _phrase_match_rank(self, query: str, quote_text: str) -> int:
+        """
+        Prefer contiguous word-sequence matches over punctuation-interrupted ones.
+
+        Rank meanings:
+        4 = exact query tokens at the start, separated only by whitespace
+        3 = exact query tokens later, separated only by whitespace
+        2 = query tokens at the start but interrupted by punctuation
+        1 = query tokens later but interrupted by punctuation
+        0 = no phrase-level match
+        """
+        query_tokens = self._normalize_search_text(query).split()
+        if len(query_tokens) < 2:
+            return 0
+
+        normalized_quote = self._normalize_phrase_match_text(quote_text)
+        if not normalized_quote:
+            return 0
+
+        strict_pattern = r"\b" + r"\s+".join(re.escape(token) for token in query_tokens) + r"\b"
+        loose_pattern = r"\b" + r"(?:[\s\W]+)".join(re.escape(token) for token in query_tokens) + r"\b"
+
+        strict_match = re.search(strict_pattern, normalized_quote, re.IGNORECASE)
+        if strict_match:
+            return 4 if strict_match.start() == 0 else 3
+
+        loose_match = re.search(loose_pattern, normalized_quote, re.IGNORECASE)
+        if loose_match:
+            return 2 if loose_match.start() == 0 else 1
+
+        return 0
+
+    def _rerank_partial_quote_results(
+        self,
+        query: str,
+        results: List[Dict[str, Any]],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Re-rank partial results to favor contiguous phrase matches."""
+        ranked: List[Dict[str, Any]] = []
+        for result in results:
+            enriched = dict(result)
+            enriched["_phrase_match_rank"] = self._phrase_match_rank(query, result.get("quote_text", ""))
+            ranked.append(enriched)
+
+        ranked.sort(
+            key=lambda item: (
+                item.get("_phrase_match_rank", 0),
+                item.get("relevance_score", 0),
+                -item.get("quote_length", 0),
+            ),
+            reverse=True,
+        )
+
+        for item in ranked:
+            item.pop("_phrase_match_rank", None)
+
+        return ranked[:limit]
 
     def _partial_quote_search_variant_in_scope(
         self,

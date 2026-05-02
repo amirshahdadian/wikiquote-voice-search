@@ -74,3 +74,48 @@ def test_partial_quote_search_falls_back_to_full_pipeline_when_empty():
 
 def test_search_service_allows_longer_quotes_in_results():
     assert QuoteSearchService.MAX_SEARCHABLE_QUOTE_LENGTH >= 388
+
+
+def test_partial_phrase_ranking_prefers_contiguous_words_over_punctuation_breaks():
+    service = QuoteSearchService("bolt://unused", "unused", "unused")
+
+    contiguous = 'I have a dream that one day this nation will rise up.'
+    interrupted = 'I have a dream: That one day, down in Alabama.'
+
+    assert service._phrase_match_rank("i have a dream that one", contiguous) > service._phrase_match_rank(
+        "i have a dream that one", interrupted
+    )
+
+
+def test_partial_phrase_ranking_treats_apostrophe_forms_as_contiguous():
+    service = QuoteSearchService("bolt://unused", "unused", "unused")
+
+    assert service._phrase_match_rank(
+        "thats one small step for",
+        "That's one small step for [a] man, one giant leap for mankind.",
+    ) == 4
+
+
+def test_partial_result_rerank_prefers_contiguous_phrase_even_when_longer():
+    service = QuoteSearchService("bolt://unused", "unused", "unused")
+
+    results = [
+        {
+            "quote_text": 'I have a dream: That one day, down in Alabama.',
+            "author_name": "Martin Luther King Jr.",
+            "source_title": "I Have a Dream",
+            "relevance_score": 0.414,
+            "quote_length": 44,
+        },
+        {
+            "quote_text": 'I have a dream that one day this nation will rise up.',
+            "author_name": "Martin Luther King Jr.",
+            "source_title": "I Have a Dream",
+            "relevance_score": 0.414,
+            "quote_length": 53,
+        },
+    ]
+
+    reranked = service._rerank_partial_quote_results("i have a dream that one", results, limit=2)
+
+    assert reranked[0]["quote_text"] == 'I have a dream that one day this nation will rise up.'
