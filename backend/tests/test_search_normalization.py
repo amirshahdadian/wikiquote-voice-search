@@ -57,7 +57,7 @@ def test_partial_quote_search_falls_back_to_full_pipeline_when_empty():
     service = QuoteSearchService("bolt://unused", "unused", "unused")
 
     service._partial_quote_search = lambda query, limit: []  # type: ignore[method-assign]
-    service._run_search_pipeline = lambda query, limit, include_fuzzy=True: [  # type: ignore[method-assign]
+    service._run_search_pipeline = lambda query, limit, include_fuzzy=True, **_kwargs: [  # type: ignore[method-assign]
         {
             "quote_text": "Your time is limited, so don't waste it living someone else's life.",
             "author_name": "Steve Jobs",

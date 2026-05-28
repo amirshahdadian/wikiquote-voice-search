@@ -187,9 +187,6 @@ export default function InteractionShell({ initialUsers }: InteractionShellProps
               {latestResponse?.recognized_user ? (
                 <span className="status-pill">
                   Identified {latestResponse.recognized_user.display_name}
-                  {typeof latestResponse.recognized_user.confidence === "number"
-                    ? ` · ${(latestResponse.recognized_user.confidence * 100).toFixed(1)}%`
-                    : ""}
                 </span>
               ) : null}
             </div>

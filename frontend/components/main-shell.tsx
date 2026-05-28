@@ -12,7 +12,7 @@ import {
   MicOff,
   Plus,
   Quote,
-  Sparkles,
+  Square,
   Trash2,
   Upload,
   User,
@@ -103,12 +103,6 @@ function userInitials(name?: string): string {
     .toUpperCase();
 }
 
-// ── Stable replay helper (no state deps) ──────────────────────────────────────
-function replayAudio(audioUrl: string) {
-  const url = resolveApiUrl(audioUrl);
-  if (url) new Audio(url).play().catch(() => {});
-}
-
 // ── Health dots ────────────────────────────────────────────────────────────────
 
 function HealthDots({ health }: { health: HealthStatus | null }) {
@@ -152,10 +146,67 @@ interface MessageBubbleProps {
 }
 
 function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const responseAudioRef = useRef<HTMLAudioElement | null>(null);
   const hasQuery = msg.query || msg.isVoice;
   const userColor = avatarColor(msg.userId);
   const initials = userInitials(msg.userName);
   const displayName = msg.userName ?? "Anyone";
+  const visibleWarnings =
+    msg.response?.warnings?.filter((warning) => warning !== "multiple_close_matches") ?? [];
+  const noQuoteFound = msg.response?.warnings?.includes("no_quote_found") ?? false;
+
+  useEffect(() => {
+    const url = resolveApiUrl(msg.response?.audio_url);
+    responseAudioRef.current?.pause();
+    responseAudioRef.current = null;
+    setAudioPlaying(false);
+
+    if (!url) return;
+
+    const audio = new Audio(url);
+    responseAudioRef.current = audio;
+    audio.onended = () => {
+      audio.currentTime = 0;
+      setAudioPlaying(false);
+    };
+    audio.onerror = () => setAudioPlaying(false);
+    audio.play().then(() => setAudioPlaying(true)).catch(() => setAudioPlaying(false));
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+      if (responseAudioRef.current === audio) {
+        responseAudioRef.current = null;
+      }
+    };
+  }, [msg.response?.audio_url]);
+
+  function stopResponseAudio() {
+    if (!responseAudioRef.current) return;
+    responseAudioRef.current.pause();
+    responseAudioRef.current.currentTime = 0;
+    setAudioPlaying(false);
+  }
+
+  function toggleResponseAudio(audioUrl: string) {
+    const url = resolveApiUrl(audioUrl);
+    if (!url) return;
+    if (!responseAudioRef.current) {
+      responseAudioRef.current = new Audio(url);
+      responseAudioRef.current.onended = () => {
+        if (responseAudioRef.current) responseAudioRef.current.currentTime = 0;
+        setAudioPlaying(false);
+      };
+      responseAudioRef.current.onerror = () => setAudioPlaying(false);
+    }
+    if (audioPlaying) {
+      stopResponseAudio();
+      return;
+    }
+    responseAudioRef.current.play().catch(() => setAudioPlaying(false));
+    setAudioPlaying(true);
+  }
 
   return (
     <motion.div
@@ -221,11 +272,11 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
           {!msg.isLoading && msg.response && (
             <div className="flex flex-col gap-2">
               {/* Warnings */}
-              {msg.response.warnings?.length > 0 && (
+              {visibleWarnings.length > 0 && (
                 <div className="flex items-start gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-200/80">
                   <AlertTriangle size={12} className="shrink-0 mt-0.5 text-amber-400" />
                   <div className="flex flex-col gap-0.5">
-                    {msg.response.warnings.map((w, i) => <span key={i}>{w}</span>)}
+                    {visibleWarnings.map((w, i) => <span key={i}>{w}</span>)}
                   </div>
                 </div>
               )}
@@ -239,7 +290,7 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
               )}
 
               {/* Primary quote */}
-              {msg.response.best_quote ? (
+              {!noQuoteFound && msg.response.best_quote ? (
                 <QuoteCard quote={msg.response.best_quote} variant="primary" audioUrl={msg.response.audio_url} />
               ) : (
                 <div className="rounded-2xl rounded-tl-sm glass ring-1 ring-white/5 px-4 py-3 text-sm text-white/45 max-w-sm">
@@ -248,7 +299,7 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
               )}
 
               {/* Related quotes */}
-              {msg.response.related_quotes?.length > 0 && (
+              {!noQuoteFound && msg.response.related_quotes?.length > 0 && (
                 <div className="flex flex-col gap-1.5 mt-0.5">
                   <span className="text-[10px] text-white/25 font-semibold uppercase tracking-[0.2em] px-0.5">
                     Related
@@ -263,10 +314,12 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
               <div className="flex flex-col gap-3 mt-1">
                 {msg.response.audio_url && (
                   <button
-                    onClick={() => replayAudio(msg.response!.audio_url!)}
+                    onClick={() => toggleResponseAudio(msg.response!.audio_url!)}
                     className="self-start flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-white/40 hover:text-white/70 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] transition-all duration-200"
+                    aria-label={audioPlaying ? "Stop response audio" : "Play response audio"}
                   >
-                    <Volume2 size={10} /> Replay
+                    {audioPlaying ? <Square size={10} /> : <Volume2 size={10} />}
+                    {audioPlaying ? "Stop" : "Play audio"}
                   </button>
                 )}
                 <div className="flex flex-col gap-2">
@@ -469,20 +522,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
-
-  // ── Auto-play TTS audio when a new response arrives ────────────────────────
-
-  useEffect(() => {
-    if (messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    if (!last.isLoading && last.response?.audio_url) {
-      const url = resolveApiUrl(last.response.audio_url);
-      if (url) {
-        const audio = new Audio(url);
-        audio.play().catch(() => {});
-      }
-    }
-  }, [messages]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -769,16 +808,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
               )}
             </AnimatePresence>
           </div>
-
-          {/* Advanced features */}
-          <Link
-            href="/advanced"
-            className="btn-secondary py-1.5 px-3 text-xs"
-            title="Advanced search features"
-          >
-            <Sparkles size={13} />
-            <span className="hidden sm:block">Advanced</span>
-          </Link>
 
           {/* Manage users */}
           <Link

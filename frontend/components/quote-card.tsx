@@ -1,8 +1,8 @@
 "use client";
 
-import { motion, AnimatePresence } from "motion/react";
-import { Pause, Play, Quote } from "lucide-react";
-import { useRef, useState } from "react";
+import { motion } from "motion/react";
+import { Play, Quote, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { QuoteResult } from "@/lib/types";
 import { resolveApiUrl } from "@/lib/api";
 
@@ -27,17 +27,32 @@ export default function QuoteCard({
 
   const resolvedAudioUrl = resolveApiUrl(audioUrl);
 
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
+  }, [resolvedAudioUrl]);
+
+  function stopAudio() {
+    if (!audioRef.current) return;
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+    setPlaying(false);
+  }
+
   function toggleAudio() {
     if (!resolvedAudioUrl) return;
     if (!audioRef.current) {
       audioRef.current = new Audio(resolvedAudioUrl);
-      audioRef.current.onended = () => setPlaying(false);
+      audioRef.current.onended = () => {
+        if (audioRef.current) audioRef.current.currentTime = 0;
+        setPlaying(false);
+      };
       audioRef.current.onerror = () => setPlaying(false);
     }
     if (playing) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      setPlaying(false);
+      stopAudio();
     } else {
       audioRef.current.play().catch(() => setPlaying(false));
       setPlaying(true);
@@ -74,11 +89,6 @@ export default function QuoteCard({
                 ? "Full-text match"
                 : "Best match"}
             </span>
-            {quote.relevance_score != null && (
-              <span className="ml-1 text-[11px] text-violet-400/70 font-mono">
-                {(quote.relevance_score * 100).toFixed(0)}%
-              </span>
-            )}
           </div>
 
           {resolvedAudioUrl && (
@@ -91,10 +101,10 @@ export default function QuoteCard({
                   ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                   : "bg-white/[0.07] text-white/60 hover:text-white hover:bg-white/[0.12] border border-white/[0.08]"
               )}
-              aria-label={playing ? "Pause audio" : "Play audio"}
+              aria-label={playing ? "Stop audio" : "Play audio"}
             >
-              {playing ? <Pause size={12} /> : <Play size={12} />}
-              {playing ? "Pause" : "Play"}
+              {playing ? <Square size={12} /> : <Play size={12} />}
+              {playing ? "Stop" : "Play"}
             </motion.button>
           )}
         </div>

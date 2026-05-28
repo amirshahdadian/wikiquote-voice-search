@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { resolveApiUrl } from "@/lib/api";
 import { ChatQueryResponse, QuoteResult, VoiceQueryResponse } from "@/lib/types";
@@ -11,7 +12,6 @@ type QuoteResponseCardProps = {
 
 const warningLabels: Record<string, string> = {
   low_asr_confidence: "ASR confidence was low. Try speaking closer to the microphone or uploading a clearer clip.",
-  multiple_close_matches: "Several close quote matches were found. You can inspect the alternatives below.",
   speaker_not_recognized: "Speaker recognition did not find a confident match. You can retry or choose a profile manually.",
   no_quote_found: "No exact quote match was found. The response uses the closest available result or asks for a rephrase.",
   tts_fallback: "Primary TTS failed, so the backend used the simpler speech fallback.",
@@ -22,10 +22,18 @@ const warningLabels: Record<string, string> = {
 
 export default function QuoteResponseCard({ response }: QuoteResponseCardProps) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     setActiveIndex(0);
+    stopAudio();
   }, [response]);
+
+  function stopAudio() {
+    if (!audioRef.current) return;
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+  }
 
   if (!response) {
     return (
@@ -47,11 +55,15 @@ export default function QuoteResponseCard({ response }: QuoteResponseCardProps) 
     );
   }
 
-  const candidates: QuoteResult[] = response.best_quote
+  const noQuoteFound = response.warnings.includes("no_quote_found");
+  const candidates: QuoteResult[] = !noQuoteFound && response.best_quote
     ? [response.best_quote, ...response.related_quotes]
+    : noQuoteFound
+    ? []
     : response.related_quotes;
-  const activeQuote = candidates[activeIndex] ?? response.best_quote ?? null;
+  const activeQuote = noQuoteFound ? null : candidates[activeIndex] ?? response.best_quote ?? null;
   const audioUrl = resolveApiUrl(response.audio_url);
+  const visibleWarnings = response.warnings.filter((warning) => warning !== "multiple_close_matches");
 
   return (
     <div className="editorial-card flex min-h-[42rem] flex-col overflow-hidden">
@@ -60,9 +72,6 @@ export default function QuoteResponseCard({ response }: QuoteResponseCardProps) 
         {response.recognized_user ? (
           <span className="status-pill">
             {response.recognized_user.display_name}
-            {typeof response.recognized_user.confidence === "number"
-              ? ` · ${(response.recognized_user.confidence * 100).toFixed(1)}%`
-              : ""}
           </span>
         ) : null}
       </div>
@@ -80,7 +89,7 @@ export default function QuoteResponseCard({ response }: QuoteResponseCardProps) 
         <div className="mt-6 rounded-2xl bg-scholarly-low p-6">
           <div className="flex items-center gap-3">
             <span className="rounded-full bg-scholarly-tertiary px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[#445269]">
-              {activeQuote.relevance_score ? `${Math.round(activeQuote.relevance_score * 100)}% match` : "Selected quote"}
+              Selected quote
             </span>
             <div className="h-px flex-1 bg-scholarly-line/20" />
           </div>
@@ -110,15 +119,19 @@ export default function QuoteResponseCard({ response }: QuoteResponseCardProps) 
       ) : null}
 
       {audioUrl ? (
-        <div className="mt-6 rounded-full bg-scholarly-low px-4 py-3">
-          <audio className="w-full" controls src={audioUrl} />
+        <div className="mt-6 flex items-center gap-3 rounded-full bg-scholarly-low px-4 py-3">
+          <audio ref={audioRef} className="w-full" controls src={audioUrl} />
+          <button className="secondary-button shrink-0" onClick={stopAudio} type="button">
+            <Square size={14} />
+            Stop
+          </button>
         </div>
       ) : null}
 
       <div className="mt-auto pt-6">
-        {response.warnings.length > 0 ? (
+        {visibleWarnings.length > 0 ? (
           <div className="space-y-2">
-            {response.warnings.map((warning) => (
+            {visibleWarnings.map((warning) => (
               <div className="notice-warning" key={warning}>
                 {warningLabels[warning] ?? warning.replaceAll("_", " ")}
               </div>
