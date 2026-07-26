@@ -22,3 +22,11 @@ def test_api_key_is_optional_for_lexical_only_startup():
 def test_embedding_dimensions_match_the_fixed_neo4j_index():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, gemini_embedding_dimensions=512)
+
+
+def test_embedding_dimensions_accept_the_string_read_from_environment(
+    monkeypatch,
+):
+    monkeypatch.setenv("GEMINI_EMBEDDING_DIMENSIONS", "768")
+
+    assert Settings(_env_file=None).gemini_embedding_dimensions == 768

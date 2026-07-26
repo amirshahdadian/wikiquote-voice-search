@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None
     gemini_llm_model: str = "gemini-3.5-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-2"
-    gemini_embedding_dimensions: Literal[768] = 768
+    gemini_embedding_dimensions: int = Field(default=768, ge=768, le=768)
     gemini_timeout_seconds: float = 8.0
     gemini_max_retries: int = 2
 
