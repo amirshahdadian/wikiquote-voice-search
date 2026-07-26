@@ -41,4 +41,4 @@ class QueryState(TypedDict, total=False):
     result_index: int
     response_text: str
     warnings: list[str]
-
+    history: list[dict[str, str]]
