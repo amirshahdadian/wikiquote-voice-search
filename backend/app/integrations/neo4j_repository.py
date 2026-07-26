@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable
 from typing import Any
 
 from neo4j import GraphDatabase
 
+from backend.app.domain import QuoteHit
 from backend.app.integrations.neo4j_schema import ensure_schema
 
 
@@ -38,12 +40,103 @@ FOREACH (_ IN CASE WHEN row.work_key IS NULL THEN [] ELSE [1] END |
 )
 """
 
+_ATTRIBUTION_SUBQUERY = """
+CALL {
+  WITH q
+  MATCH (q)-[:HAS_ATTRIBUTION]->(attribution:Attribution)-[:FOUND_ON]->(page:WikiquotePage)
+  OPTIONAL MATCH (attribution)-[:ATTRIBUTED_TO]->(author:Author)
+  OPTIONAL MATCH (attribution)-[:FROM_WORK]->(work:Work)
+  WITH attribution, page, author, work
+  ORDER BY CASE attribution.status
+    WHEN 'sourced' THEN 0
+    WHEN 'attributed' THEN 1
+    WHEN 'disputed' THEN 2
+    ELSE 3
+  END, page.title
+  RETURN author.name AS author_name,
+         work.title AS work_title,
+         attribution.citation AS citation,
+         page.title AS page_title
+  LIMIT 1
+}
+"""
+
+_LEXICAL_QUERY = (
+    """
+CALL db.index.fulltext.queryNodes('quote_text', $query, {limit: $candidate_limit})
+YIELD node AS q, score
+"""
+    + _ATTRIBUTION_SUBQUERY
+    + """
+RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
+       citation, page_title, score
+ORDER BY score DESC
+LIMIT $limit
+"""
+)
+
+_VECTOR_QUERY = (
+    """
+CALL db.index.vector.queryNodes('quote_embedding', $candidate_limit, $embedding)
+YIELD node AS q, score
+"""
+    + _ATTRIBUTION_SUBQUERY
+    + """
+RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
+       citation, page_title, score
+ORDER BY score DESC
+LIMIT $limit
+"""
+)
+
+_AUTHOR_QUERY = (
+    """
+CALL db.index.fulltext.queryNodes('author_name', $query, {limit: 5})
+YIELD node AS matched_author, score
+MATCH (q:Quote)-[:HAS_ATTRIBUTION]->(matched_attribution:Attribution)
+      -[:ATTRIBUTED_TO]->(matched_author)
+WITH DISTINCT q, score
+"""
+    + _ATTRIBUTION_SUBQUERY
+    + """
+RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
+       citation, page_title, score
+ORDER BY score DESC, quote_text
+LIMIT $limit
+"""
+)
+
+_AUTOCOMPLETE_QUERY = (
+    """
+CALL db.index.fulltext.queryNodes('quote_text', $query, {limit: $candidate_limit})
+YIELD node AS q, score
+"""
+    + _ATTRIBUTION_SUBQUERY
+    + """
+RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
+       citation, page_title, score
+ORDER BY CASE WHEN q.normalized_text STARTS WITH $normalized THEN 0 ELSE 1 END,
+         score DESC
+LIMIT $limit
+"""
+)
+
 
 def _entity_key(value: str | None) -> str | None:
     if not value or not value.strip():
         return None
     normalized = " ".join(value.split()).casefold()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _lucene_query(value: str, *, prefix: bool = False) -> str:
+    cleaned = re.sub(r'[+\-!(){}\[\]^"~*?:\\/]', " ", value)
+    terms = cleaned.split()
+    if not terms:
+        return '""'
+    if prefix:
+        terms[-1] = f"{terms[-1]}*"
+    return " AND ".join(terms)
 
 
 class Neo4jQuoteRepository:
@@ -184,3 +277,81 @@ class Neo4jQuoteRepository:
                 model=model,
                 dimensions=dimensions,
             )
+
+    def lexical_search(self, text: str, limit: int) -> list[QuoteHit]:
+        return self._query_hits(
+            _LEXICAL_QUERY,
+            search_type="lexical",
+            query=_lucene_query(text),
+            candidate_limit=max(limit, 50),
+            limit=limit,
+        )
+
+    def vector_search(self, vector: list[float], limit: int) -> list[QuoteHit]:
+        return self._query_hits(
+            _VECTOR_QUERY,
+            search_type="vector",
+            embedding=vector,
+            candidate_limit=max(limit, 50),
+            limit=limit,
+        )
+
+    def author_search(self, name: str, limit: int) -> list[QuoteHit]:
+        return self._query_hits(
+            _AUTHOR_QUERY,
+            search_type="author",
+            query=_lucene_query(name),
+            limit=limit,
+        )
+
+    def autocomplete(self, text: str, limit: int) -> list[QuoteHit]:
+        normalized = " ".join(text.casefold().split())
+        return self._query_hits(
+            _AUTOCOMPLETE_QUERY,
+            search_type="autocomplete",
+            query=_lucene_query(text, prefix=True),
+            normalized=normalized,
+            candidate_limit=max(limit * 10, 50),
+            limit=limit,
+        )
+
+    def random_quote(self) -> QuoteHit | None:
+        query = (
+            "MATCH (q:Quote) WITH q, rand() AS random ORDER BY random LIMIT 1\n"
+            + _ATTRIBUTION_SUBQUERY
+            + """
+RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
+       citation, page_title, 1.0 AS score
+"""
+        )
+        hits = self._query_hits(query, search_type="random")
+        return hits[0] if hits else None
+
+    def popular_authors(self, limit: int) -> list[dict[str, Any]]:
+        query = """
+        MATCH (q:Quote)-[:HAS_ATTRIBUTION]->(:Attribution)-[:ATTRIBUTED_TO]->(a:Author)
+        RETURN a.name AS author_name, count(DISTINCT q) AS quote_count
+        ORDER BY quote_count DESC, author_name
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            return [dict(record) for record in session.run(query, limit=limit)]
+
+    def _query_hits(
+        self, cypher: str, *, search_type: str, **parameters: Any
+    ) -> list[QuoteHit]:
+        with self.driver.session() as session:
+            records = session.run(cypher, **parameters)
+            return [
+                QuoteHit(
+                    quote_id=record["quote_id"],
+                    quote_text=record["quote_text"],
+                    author_name=record.get("author_name"),
+                    work_title=record.get("work_title"),
+                    citation=record.get("citation"),
+                    page_title=record["page_title"],
+                    score=float(record["score"]),
+                    search_type=search_type,
+                )
+                for record in records
+            ]

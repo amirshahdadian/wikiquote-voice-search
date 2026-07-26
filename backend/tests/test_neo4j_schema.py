@@ -9,8 +9,8 @@ class RecordingSession:
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
 
-    def run(self, query: str, **parameters):
-        self.calls.append((query, parameters))
+    def run(self, cypher: str, **parameters):
+        self.calls.append((cypher, parameters))
         return []
 
 
@@ -84,3 +84,22 @@ def test_maintenance_cli_has_explicit_graph_commands():
     assert parser.parse_args(["load"]).command == "load"
     assert parser.parse_args(["embed"]).command == "embed"
     assert parser.parse_args(["verify"]).command == "verify"
+
+
+def test_runtime_search_uses_only_fixed_semantic_index_queries():
+    driver = RecordingDriver()
+    repository = Neo4jQuoteRepository(driver=driver)
+
+    assert repository.lexical_search("hope + courage", 5) == []
+    assert repository.vector_search([0.0] * 768, 5) == []
+    assert repository.author_search("Virginia Woolf", 5) == []
+    assert repository.autocomplete("to be", 5) == []
+
+    lexical, vector, author, autocomplete = [
+        query for query, _ in driver.session_instance.calls
+    ]
+    assert "db.index.fulltext.queryNodes('quote_text'" in lexical
+    assert "db.index.vector.queryNodes('quote_embedding'" in vector
+    assert "db.index.fulltext.queryNodes('author_name'" in author
+    assert "db.index.fulltext.queryNodes('quote_text'" in autocomplete
+    assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, author, autocomplete))
