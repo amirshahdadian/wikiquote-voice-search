@@ -138,3 +138,49 @@ class Neo4jQuoteRepository:
                 ).single()
                 counts[label] = int(record["count"])
         return counts
+
+    def pending_embedding_rows(
+        self, model: str, dimensions: int, limit: int
+    ) -> list[dict[str, str]]:
+        query = """
+        MATCH (q:Quote)
+        WHERE q.embedding IS NULL
+           OR q.embedding_model IS NULL
+           OR q.embedding_model <> $model
+           OR q.embedding_dimensions <> $dimensions
+        RETURN q.id AS quote_id, q.text AS quote_text
+        ORDER BY q.id
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            result = session.run(
+                query, model=model, dimensions=dimensions, limit=limit
+            )
+            return [dict(record) for record in result]
+
+    def save_embeddings(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        model: str,
+        dimensions: int,
+    ) -> None:
+        for record in records:
+            if len(record["embedding"]) != dimensions:
+                raise ValueError(
+                    f'Embedding for {record["quote_id"]} has the wrong dimensions'
+                )
+        query = """
+        UNWIND $rows AS row
+        MATCH (q:Quote {id: row.quote_id})
+        SET q.embedding = row.embedding,
+            q.embedding_model = $model,
+            q.embedding_dimensions = $dimensions
+        """
+        with self.driver.session() as session:
+            session.run(
+                query,
+                rows=records,
+                model=model,
+                dimensions=dimensions,
+            )
