@@ -19,11 +19,6 @@ class QuoteSearchService:
         )
         return [self._serialize(hit) for hit in hits]
 
-    async def search_by_theme(
-        self, theme: str, limit: int = 10
-    ) -> list[dict[str, Any]]:
-        return await self.search_quotes(theme, limit)
-
     def autocomplete(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         return [
             self._serialize(hit)

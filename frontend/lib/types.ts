@@ -4,9 +4,12 @@ export type AuthorResult = {
 };
 
 export type QuoteResult = {
+  quote_id: string;
   quote_text: string;
-  author_name: string;
-  source_title: string;
+  author_name?: string | null;
+  source_title?: string | null;
+  page_title: string;
+  citation?: string | null;
   relevance_score?: number | null;
   search_type?: string | null;
   match_position?: string | null;

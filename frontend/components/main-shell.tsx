@@ -41,8 +41,8 @@ import {
   fetchHealth,
   registerUser,
   resolveApiUrl,
-  submitChatQuery,
-  submitVoiceQuery,
+  sendChatQuery,
+  sendVoiceQuery as requestVoiceQuery,
 } from "@/lib/api";
 import QuoteCard from "@/components/quote-card";
 import VoiceWaveform from "@/components/voice-waveform";
@@ -550,7 +550,7 @@ export default function MainShell({ initialUsers }: MainShellProps) {
     setIsLoading(true);
 
     try {
-      const data = await submitChatQuery({
+      const data = await sendChatQuery({
         message: text.trim(),
         conversation_id: conversationId,
         selected_user_id: selectedUserId,
@@ -659,7 +659,7 @@ export default function MainShell({ initialUsers }: MainShellProps) {
 
     try {
       const ext = mimeType.includes("webm") ? "webm" : "ogg";
-      const data = await submitVoiceQuery({
+      const data = await requestVoiceQuery({
         audio: blob,
         filename: `recording.${ext}`,
         conversation_id: conversationId,

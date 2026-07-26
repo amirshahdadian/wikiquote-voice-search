@@ -1,5 +1,4 @@
 import {
-  AuthorResult,
   ChatQueryResponse,
   HealthStatus,
   QuoteResult,
@@ -82,15 +81,7 @@ export async function fetchHealth(): Promise<HealthStatus | null> {
   }
 }
 
-export async function fetchRandomQuote(): Promise<QuoteResult | null> {
-  try {
-    return await requestJson<QuoteResult | null>("/api/quotes/random");
-  } catch {
-    return null;
-  }
-}
-
-export async function submitChatQuery(payload: {
+export async function sendChatQuery(payload: {
   message: string;
   conversation_id?: string | null;
   selected_user_id?: string | null;
@@ -102,7 +93,7 @@ export async function submitChatQuery(payload: {
   });
 }
 
-export async function submitVoiceQuery(payload: {
+export async function sendVoiceQuery(payload: {
   audio: Blob;
   filename?: string;
   conversation_id?: string | null;
@@ -190,51 +181,18 @@ export async function deleteUserProfile(userId: string): Promise<void> {
   }
 }
 
-export async function fetchPopularAuthors(limit = 20): Promise<AuthorResult[]> {
-  try {
-    return await requestJson<AuthorResult[]>(`/api/authors/popular?limit=${limit}`);
-  } catch {
-    return [];
-  }
+export async function searchQuotes(query: string, limit = 5): Promise<QuoteResult[]> {
+  if (!query.trim()) return [];
+  return requestJson<QuoteResult[]>(
+    `/api/quotes/search?query=${encodeURIComponent(query)}&limit=${limit}`
+  );
 }
 
-export async function fetchThemeQuotes(theme: string, limit = 10): Promise<QuoteResult[]> {
-  try {
-    return await requestJson<QuoteResult[]>(
-      `/api/quotes/by-theme?theme=${encodeURIComponent(theme)}&limit=${limit}`
-    );
-  } catch {
-    return [];
-  }
-}
-
-export async function fetchAutocomplete(query: string, limit = 5): Promise<QuoteResult[]> {
+export async function autocompleteQuotes(query: string, limit = 5): Promise<QuoteResult[]> {
   if (!query.trim()) return [];
   try {
     return await requestJson<QuoteResult[]>(
       `/api/quotes/autocomplete?query=${encodeURIComponent(query)}&limit=${limit}`
-    );
-  } catch {
-    return [];
-  }
-}
-
-export async function fetchIntelligentSearch(query: string, limit = 10): Promise<QuoteResult[]> {
-  if (!query.trim()) return [];
-  try {
-    return await requestJson<QuoteResult[]>(
-      `/api/quotes/intelligent-search?query=${encodeURIComponent(query)}&limit=${limit}`
-    );
-  } catch {
-    return [];
-  }
-}
-
-export async function fetchVoiceSearch(query: string, limit = 3): Promise<QuoteResult[]> {
-  if (!query.trim()) return [];
-  try {
-    return await requestJson<QuoteResult[]>(
-      `/api/quotes/voice-search?query=${encodeURIComponent(query)}&limit=${limit}`
     );
   } catch {
     return [];

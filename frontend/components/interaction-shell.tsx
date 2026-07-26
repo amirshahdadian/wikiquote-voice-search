@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 import AudioRecorder from "@/components/audio-recorder";
 import QuoteResponseCard from "@/components/quote-response-card";
-import { submitChatQuery, submitVoiceQuery } from "@/lib/api";
+import { sendChatQuery, sendVoiceQuery } from "@/lib/api";
 import { ChatQueryResponse, LocalAudioSample, UserProfile, VoiceQueryResponse } from "@/lib/types";
 
 type HistoryEntry = {
@@ -66,7 +66,7 @@ export default function InteractionShell({ initialUsers }: InteractionShellProps
     setStatusText("Searching the graph and generating a response...");
 
     try {
-      const payload = await submitChatQuery({
+      const payload = await sendChatQuery({
         message: message.trim(),
         conversation_id: conversationId ?? undefined,
         selected_user_id: selectedUserId || undefined,
@@ -80,12 +80,12 @@ export default function InteractionShell({ initialUsers }: InteractionShellProps
     }
   }
 
-  async function sendVoiceQuery(sample: LocalAudioSample) {
+  async function handleVoiceQuery(sample: LocalAudioSample) {
     setError(null);
     setStatusText("Transcribing, recognizing the speaker, searching, and generating audio...");
 
     try {
-      const payload = await submitVoiceQuery({
+      const payload = await sendVoiceQuery({
         audio: sample.blob,
         filename: sample.name,
         conversation_id: conversationId,
@@ -205,7 +205,7 @@ export default function InteractionShell({ initialUsers }: InteractionShellProps
               <AudioRecorder
                 buttonLabel="Record Voice Query"
                 onPermissionDenied={setPermissionWarning}
-                onRecorded={sendVoiceQuery}
+                onRecorded={handleVoiceQuery}
                 onStatusChange={(status) => {
                   if (status === "recording") {
                     setStatusText("Listening...");

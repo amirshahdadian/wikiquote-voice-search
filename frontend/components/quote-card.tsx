@@ -116,9 +116,11 @@ export default function QuoteCard({
 
         {/* Attribution */}
         <footer className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-sm font-semibold text-violet-300">
-            {quote.author_name}
-          </span>
+          {quote.author_name && (
+            <span className="text-sm font-semibold text-violet-300">
+              {quote.author_name}
+            </span>
+          )}
           {quote.source_title && (
             <>
               <span className="text-white/25 text-xs">&mdash;</span>
@@ -128,6 +130,10 @@ export default function QuoteCard({
             </>
           )}
         </footer>
+        <p className="mt-3 text-[11px] text-white/35">
+          Wikiquote: {quote.page_title}
+          {quote.citation ? ` · ${quote.citation}` : ""}
+        </p>
       </motion.div>
     );
   }
@@ -157,15 +163,21 @@ export default function QuoteCard({
       </p>
 
       <footer className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-        <span className="text-[11px] font-semibold text-amber-400/80">
-          {quote.author_name}
-        </span>
+        {quote.author_name && (
+          <span className="text-[11px] font-semibold text-amber-400/80">
+            {quote.author_name}
+          </span>
+        )}
         {quote.source_title && (
           <span className="text-[11px] text-white/30 italic">
             · {quote.source_title}
           </span>
         )}
       </footer>
+      <p className="mt-2 text-[10px] text-white/25">
+        Wikiquote: {quote.page_title}
+        {quote.citation ? ` · ${quote.citation}` : ""}
+      </p>
     </motion.div>
   );
 }

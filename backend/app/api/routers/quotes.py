@@ -26,16 +26,6 @@ def get_random_quote(search_service: QuoteSearchService = Depends(get_quote_sear
     return QuoteResult(**quote) if quote else None
 
 
-@router.get("/by-theme", response_model=list[QuoteResult])
-async def search_by_theme(
-    theme: str = Query(min_length=1, description="Topic or theme (e.g. love, wisdom, courage)"),
-    limit: int = Query(default=10, ge=1, le=30),
-    search_service: QuoteSearchService = Depends(get_quote_search_service),
-) -> list[QuoteResult]:
-    quotes = await search_service.search_by_theme(theme, limit=limit)
-    return [QuoteResult(**quote) for quote in quotes]
-
-
 @router.get("/autocomplete", response_model=list[QuoteResult])
 def autocomplete(
     query: str = Query(min_length=1, description="Partial quote fragment for live suggestions"),
@@ -43,23 +33,3 @@ def autocomplete(
     search_service: QuoteSearchService = Depends(get_quote_search_service),
 ) -> list[QuoteResult]:
     return [QuoteResult(**quote) for quote in search_service.autocomplete(query, limit=limit)]
-
-
-@router.get("/intelligent-search", response_model=list[QuoteResult])
-async def intelligent_search(
-    query: str = Query(min_length=1, description="Free-form query with fuzzy matching enabled"),
-    limit: int = Query(default=10, ge=1, le=30),
-    search_service: QuoteSearchService = Depends(get_quote_search_service),
-) -> list[QuoteResult]:
-    quotes = await search_service.search_quotes(query, limit=limit)
-    return [QuoteResult(**quote) for quote in quotes]
-
-
-@router.get("/voice-search", response_model=list[QuoteResult])
-async def voice_search(
-    query: str = Query(min_length=1, description="Voice query text"),
-    limit: int = Query(default=3, ge=1, le=10),
-    search_service: QuoteSearchService = Depends(get_quote_search_service),
-) -> list[QuoteResult]:
-    quotes = await search_service.search_quotes(query, limit=limit)
-    return [QuoteResult(**quote) for quote in quotes]
