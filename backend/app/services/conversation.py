@@ -35,14 +35,13 @@ class ConversationService:
         selected_user_id: str | None = None,
     ) -> dict[str, Any]:
         resolved_id = conversation_id or uuid.uuid4().hex
-        transcript, normalized = await asyncio.to_thread(
+        transcript = await asyncio.to_thread(
             self.voice_service.transcribe_bytes, audio_bytes, filename
         )
         if not transcript:
             return {
                 "conversation_id": resolved_id,
                 "transcript": "",
-                "normalized_transcript": "",
                 "recognized_user": None,
                 "intent_type": "asr_error",
                 "response_text": "I’m not sure I understood. Please repeat your request.",
@@ -69,14 +68,10 @@ class ConversationService:
             state, resolved_id, selected_user_id, recognized_user, warnings
         )
         response["transcript"] = transcript
-        response["normalized_transcript"] = normalized
         return response
 
     async def _query(self, message: str, conversation_id: str) -> dict[str, Any]:
-        return await self.workflow.ainvoke(
-            {"message": message, "conversation_id": conversation_id},
-            {"configurable": {"thread_id": conversation_id}},
-        )
+        return await self.workflow.run(message, conversation_id)
 
     async def _response(
         self,
@@ -90,7 +85,7 @@ class ConversationService:
         index = min(state.get("result_index", 0), max(len(hits) - 1, 0))
         best = hits[index] if hits else None
         related = [
-            self._serialize(hit)
+            hit.model_dump(by_alias=True)
             for hit_index, hit in enumerate(hits)
             if hit_index != index
         ][:3]
@@ -112,7 +107,7 @@ class ConversationService:
             "recognized_user": recognized_user,
             "intent_type": intent.kind if intent else "topic",
             "response_text": response_text,
-            "best_quote": self._serialize(best) if best else None,
+            "best_quote": best.model_dump(by_alias=True) if best else None,
             "related_quotes": related,
             "audio_url": audio_url,
             "warnings": self._dedupe([*state.get("warnings", []), *warnings]),
@@ -133,19 +128,6 @@ class ConversationService:
     @staticmethod
     def _as_hit(value: QuoteHit | dict[str, Any]) -> QuoteHit:
         return value if isinstance(value, QuoteHit) else QuoteHit.model_validate(value)
-
-    @staticmethod
-    def _serialize(hit: QuoteHit) -> dict[str, Any]:
-        return {
-            "quote_id": hit.quote_id,
-            "quote_text": hit.quote_text,
-            "author_name": hit.author_name,
-            "source_title": hit.work_title,
-            "page_title": hit.page_title,
-            "citation": hit.citation,
-            "relevance_score": hit.score,
-            "search_type": hit.search_type,
-        }
 
     @staticmethod
     def _dedupe(values: list[str]) -> list[str]:

@@ -8,7 +8,7 @@ from backend.app.core.settings import Settings
 from backend.app.integrations.audio import SpeakerIdentificationService
 from backend.app.integrations.gemini import GeminiService
 from backend.app.integrations.neo4j_repository import Neo4jQuoteRepository
-from backend.app.services import ConversationService, QuoteSearchService, UserService, VoiceService
+from backend.app.services import ConversationService, UserService, VoiceService
 from backend.app.services.hybrid_search import HybridSearch
 from backend.app.services.query_workflow import build_query_workflow
 
@@ -28,16 +28,15 @@ class AppContainer:
             app_settings.gemini_embedding_model,
             app_settings.gemini_embedding_dimensions,
         )
-        repository = Neo4jQuoteRepository(
+        self.repository = Neo4jQuoteRepository(
             app_settings.neo4j_uri,
             app_settings.neo4j_username,
             app_settings.neo4j_password,
         )
-        hybrid_search = HybridSearch(repository, gemini_service)
-        workflow = build_query_workflow(gemini_service, hybrid_search)
+        self.search = HybridSearch(self.repository, gemini_service)
+        workflow = build_query_workflow(gemini_service, self.search)
 
         speaker_service = SpeakerIdentificationService(threshold=0.75)
-        self.quote_search = QuoteSearchService(repository, hybrid_search)
         self.voice = VoiceService(app_settings, speaker_service=speaker_service)
         self.users = UserService(app_settings, speaker_service=speaker_service)
         self.conversation = ConversationService(workflow, self.users, self.voice)
@@ -57,10 +56,10 @@ class AppContainer:
         )
 
     def health_flags(self) -> dict[str, bool]:
-        ready = self.quote_search.repository.is_ready()
+        ready = self.repository.is_ready()
         return self.voice.health_flags(search_ready=ready)
 
     def close(self) -> None:
-        self.quote_search.close()
+        self.repository.close()
         if self.gemini_client is not None:
             self.gemini_client.close()

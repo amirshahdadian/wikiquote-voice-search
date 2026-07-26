@@ -4,7 +4,6 @@ import pytest
 
 from backend.app.domain import QuoteHit, SearchIntent
 from backend.app.integrations.gemini import GeminiUnavailable
-from backend.app.services.quote_search import QuoteSearchService
 from backend.app.services.hybrid_search import HybridSearch, reciprocal_rank_fusion
 
 
@@ -77,6 +76,15 @@ def test_topic_search_combines_lexical_and_vector_results():
     assert repository.calls == ["lexical", "vector"]
 
 
+def test_plain_text_search_builds_a_topic_intent():
+    repository = FakeRepository()
+    search = HybridSearch(repository, FakeGemini())
+
+    results = asyncio.run(search.search_text("courage", limit=3))
+
+    assert results[0].quote_id == "shared"
+
+
 def test_embedding_failure_returns_lexical_results():
     repository = FakeRepository()
     search = HybridSearch(repository, FakeGemini(fail=True))
@@ -121,8 +129,8 @@ def test_author_and_random_intents_use_fixed_repository_methods():
 @pytest.mark.parametrize("query", ["can't stop", "cant stop", "can’t stop"])
 def test_autocomplete_accepts_apostrophe_forms(query):
     repository = FakeRepository()
-    service = QuoteSearchService(repository, hybrid_search=None)
+    search = HybridSearch(repository, FakeGemini())
 
-    results = service.autocomplete(query, 5)
+    results = search.autocomplete(query, 5)
 
-    assert results[0]["quote_id"] == "apostrophe-quote"
+    assert results[0].quote_id == "apostrophe-quote"

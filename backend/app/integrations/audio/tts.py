@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import soundfile as sf
+
+from backend.app.integrations.sqlite_users import get_tts_preferences
 
 logger = logging.getLogger(__name__)
 
@@ -117,23 +118,7 @@ class TTSService:
         }
         if not user_id or not self.db_path:
             return defaults
-        try:
-            with sqlite3.connect(self.db_path) as connection:
-                row = connection.execute(
-                    """
-                    SELECT speaking_rate, energy_scale, style
-                    FROM user_tts_preferences
-                    WHERE user_id = ?
-                    """,
-                    (user_id,),
-                ).fetchone()
-        except sqlite3.Error:
-            logger.exception("Could not read TTS preferences")
-            return defaults
-        if not row:
-            return defaults
         return {
-            "speaking_rate": row[0],
-            "energy_scale": row[1],
-            "style": row[2],
+            **defaults,
+            **(get_tts_preferences(user_id, Path(self.db_path)) or {}),
         }

@@ -23,8 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Maintain the Wikiquote graph")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("schema", help="Create constraints and search indexes")
-    load = commands.add_parser("load", help="Load extracted quotes")
-    load.add_argument("--allow-legacy-database", action="store_true")
+    commands.add_parser("load", help="Load extracted quotes")
     commands.add_parser("embed", help="Submit or import a Gemini embedding batch")
     commands.add_parser("verify", help="Print graph node counts")
     return parser
@@ -129,10 +128,6 @@ def run_command(
             graph.ensure_schema()
             return None
         if args.command == "load":
-            if graph.has_legacy_schema() and not args.allow_legacy_database:
-                raise RuntimeError(
-                    "Legacy QuoteOccurrence/Source nodes found; load into an empty database"
-                )
             graph.ensure_schema()
             graph.load(
                 load_rows(app_settings.resolved_quotes_file),

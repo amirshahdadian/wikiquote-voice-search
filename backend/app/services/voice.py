@@ -52,13 +52,11 @@ class VoiceService:
             "sqlite": self.settings.resolved_db_path.exists(),
         }
 
-    def transcribe_bytes(self, audio_bytes: bytes, filename: str) -> tuple[str, str]:
+    def transcribe_bytes(self, audio_bytes: bytes, filename: str) -> str:
         temp_path = self.write_temp_file(filename, audio_bytes)
         try:
             result = self.asr_service.transcribe(temp_path)
-            transcript = result["text"].strip()
-            normalized = result.get("normalized_text", transcript).strip()
-            return transcript, normalized
+            return result["text"].strip()
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)

@@ -3,73 +3,36 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import Any
 
-from langgraph.graph import END, START, StateGraph
-
 from backend.app.domain import QueryState
 
 
-class BoundedQueryWorkflow:
-    """Keep only the latest bounded state for each recent conversation."""
-
-    def __init__(self, graph: Any, max_threads: int):
-        self.graph = graph
+class QueryWorkflow:
+    def __init__(self, gemini: Any, search: Any, max_threads: int = 1000):
+        self.gemini = gemini
+        self.search = search
         self.max_threads = max_threads
         self.states: OrderedDict[str, QueryState] = OrderedDict()
 
-    async def ainvoke(self, payload: QueryState, config: dict[str, Any]):
-        thread_id = config["configurable"]["thread_id"]
-        previous = self.states.pop(thread_id, {})
-        result = await self.graph.ainvoke({**previous, **payload}, config)
-        self.states[thread_id] = result
-        while len(self.states) > self.max_threads:
-            self.states.popitem(last=False)
-        return result
+    async def run(self, message: str, conversation_id: str) -> QueryState:
+        previous = self.states.pop(conversation_id, {})
+        intent = await self.gemini.interpret(message, previous.get("history", []))
+        hits = previous.get("hits", [])
+        result_index = previous.get("result_index", 0)
+        warnings: list[str] = []
 
+        if intent.kind == "alternative" and hits:
+            if result_index + 1 < len(hits):
+                result_index += 1
+            else:
+                warnings.append("no_additional_matches")
+        elif intent.kind not in {"repeat", "attribution"} or not hits:
+            hits = await self.search.search(intent)
+            result_index = 0
+            if not hits:
+                warnings.append("no_quote_found")
 
-def build_query_workflow(
-    gemini: Any,
-    search: Any,
-    *,
-    max_threads: int = 1000,
-):
-    async def interpret(state: QueryState) -> QueryState:
-        intent = await gemini.interpret(
-            state["message"],
-            state.get("history", []),
-        )
-        return {"intent": intent, "warnings": []}
-
-    async def retrieve(state: QueryState) -> QueryState:
-        intent = state["intent"]
-        previous = state.get("hits", [])
-        current_index = state.get("result_index", 0)
-        if intent.kind in {"repeat", "attribution"} and previous:
-            return {"result_index": current_index}
-        if intent.kind == "alternative" and previous:
-            next_index = current_index + 1
-            if next_index < len(previous):
-                return {"result_index": next_index}
-            return {
-                "result_index": current_index,
-                "warnings": ["no_additional_matches"],
-            }
-        hits = await search.search(intent)
-        return {
-            "hits": hits,
-            "result_index": 0,
-            "warnings": [] if hits else ["no_quote_found"],
-        }
-
-    def respond(state: QueryState) -> QueryState:
-        hits = state.get("hits", [])
-        intent = state["intent"]
-        if not hits:
-            response_text = (
-                f'I could not find a reliable match for "{intent.search_text}".'
-            )
-        else:
-            index = min(state.get("result_index", 0), len(hits) - 1)
-            selected = hits[index]
+        if hits:
+            selected = hits[min(result_index, len(hits) - 1)]
             author = selected.author_name or "Unknown attribution"
             if intent.kind == "attribution":
                 response_text = (
@@ -78,20 +41,35 @@ def build_query_workflow(
                 )
             else:
                 response_text = f'"{selected.quote_text}" — {author}'
+        else:
+            response_text = (
+                f'I could not find a reliable match for "{intent.search_text}".'
+            )
 
-        history = [
-            *state.get("history", []),
-            {"role": "user", "content": state["message"]},
-            {"role": "assistant", "content": response_text},
-        ][-8:]
-        return {"response_text": response_text, "history": history}
+        state: QueryState = {
+            "message": message,
+            "conversation_id": conversation_id,
+            "intent": intent,
+            "hits": hits,
+            "result_index": result_index,
+            "response_text": response_text,
+            "warnings": warnings,
+            "history": [
+                *previous.get("history", []),
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": response_text},
+            ][-8:],
+        }
+        self.states[conversation_id] = state
+        while len(self.states) > self.max_threads:
+            self.states.popitem(last=False)
+        return state
 
-    builder = StateGraph(QueryState)
-    builder.add_node("interpret", interpret)
-    builder.add_node("retrieve", retrieve)
-    builder.add_node("respond", respond)
-    builder.add_edge(START, "interpret")
-    builder.add_edge("interpret", "retrieve")
-    builder.add_edge("retrieve", "respond")
-    builder.add_edge("respond", END)
-    return BoundedQueryWorkflow(builder.compile(), max_threads)
+
+def build_query_workflow(
+    gemini: Any,
+    search: Any,
+    *,
+    max_threads: int = 1000,
+) -> QueryWorkflow:
+    return QueryWorkflow(gemini, search, max_threads)

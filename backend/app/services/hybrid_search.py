@@ -33,6 +33,14 @@ class HybridSearch:
         self.repository = repository
         self.gemini = gemini
 
+    async def search_text(self, query: str, limit: int = 5) -> list[QuoteHit]:
+        return await self.search(
+            SearchIntent(kind="topic", search_text=query, limit=limit)
+        )
+
+    def autocomplete(self, query: str, limit: int = 5) -> list[QuoteHit]:
+        return self.repository.autocomplete(query, limit)
+
     async def search(self, intent: SearchIntent) -> list[QuoteHit]:
         if intent.kind == "author":
             return await asyncio.to_thread(

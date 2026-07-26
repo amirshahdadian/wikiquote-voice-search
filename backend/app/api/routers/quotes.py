@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from backend.app.api.dependencies import get_quote_search_service
+from backend.app.api.dependencies import get_search_service
 from backend.app.api.schemas import QuoteResult
-from backend.app.services import QuoteSearchService
+from backend.app.services.hybrid_search import HybridSearch
 
 router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 
@@ -14,16 +14,15 @@ router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 async def search_quotes(
     query: str = Query(min_length=1),
     limit: int = Query(default=5, ge=1, le=20),
-    search_service: QuoteSearchService = Depends(get_quote_search_service),
+    search_service: HybridSearch = Depends(get_search_service),
 ) -> list[QuoteResult]:
-    quotes = await search_service.search_quotes(query, limit=limit)
-    return [QuoteResult(**quote) for quote in quotes]
+    return await search_service.search_text(query, limit=limit)
 
 
 @router.get("/autocomplete", response_model=list[QuoteResult])
 def autocomplete(
     query: str = Query(min_length=1, description="Partial quote fragment for live suggestions"),
     limit: int = Query(default=5, ge=1, le=10),
-    search_service: QuoteSearchService = Depends(get_quote_search_service),
+    search_service: HybridSearch = Depends(get_search_service),
 ) -> list[QuoteResult]:
-    return [QuoteResult(**quote) for quote in search_service.autocomplete(query, limit=limit)]
+    return search_service.autocomplete(query, limit=limit)

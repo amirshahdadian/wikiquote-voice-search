@@ -61,7 +61,6 @@ class ASRService:
         logger.info("Transcription completed")
         return {
             "text": text,
-            "normalized_text": text,
             "language": result.get("language", language or "unknown"),
             "backend": "mlx",
             "segments": result.get("segments", []),

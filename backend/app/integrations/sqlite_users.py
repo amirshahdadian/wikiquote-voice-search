@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 );
 CREATE TABLE IF NOT EXISTS user_tts_preferences (
     user_id TEXT PRIMARY KEY REFERENCES user_profiles(user_id) ON DELETE CASCADE,
-    pitch_scale REAL NOT NULL DEFAULT 1.0,
     speaking_rate REAL NOT NULL DEFAULT 1.0,
     energy_scale REAL NOT NULL DEFAULT 1.0,
     style TEXT NOT NULL DEFAULT 'neutral',
@@ -132,10 +131,9 @@ def save_tts_preferences(
             connection.execute(
                 """
                 INSERT INTO user_tts_preferences (
-                    user_id, pitch_scale, speaking_rate, energy_scale, style
-                ) VALUES (?, ?, ?, ?, ?)
+                    user_id, speaking_rate, energy_scale, style
+                ) VALUES (?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
-                    pitch_scale = excluded.pitch_scale,
                     speaking_rate = excluded.speaking_rate,
                     energy_scale = excluded.energy_scale,
                     style = excluded.style,
@@ -143,7 +141,6 @@ def save_tts_preferences(
                 """,
                 (
                     user_id,
-                    preferences.get("pitch_scale", 1.0),
                     preferences.get("speaking_rate", 1.0),
                     preferences.get("energy_scale", 1.0),
                     preferences.get("style", "neutral"),
@@ -162,7 +159,7 @@ def get_tts_preferences(
         with get_connection(db_path) as connection:
             row = connection.execute(
                 """
-                SELECT pitch_scale, speaking_rate, energy_scale, style
+                SELECT speaking_rate, energy_scale, style
                 FROM user_tts_preferences
                 WHERE user_id = ?
                 """,
@@ -187,19 +184,3 @@ def delete_tts_preferences(
     except sqlite3.Error:
         logger.exception("Could not delete TTS preferences")
         return False
-
-
-def list_tts_preference_users(db_path: Path | None = None) -> list[str]:
-    try:
-        with get_connection(db_path) as connection:
-            rows = connection.execute(
-                """
-                SELECT user_id
-                FROM user_tts_preferences
-                ORDER BY user_id COLLATE NOCASE
-                """
-            ).fetchall()
-        return [row["user_id"] for row in rows]
-    except sqlite3.Error:
-        logger.exception("Could not list TTS preference users")
-        return []

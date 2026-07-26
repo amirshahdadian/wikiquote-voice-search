@@ -243,15 +243,6 @@ class Neo4jQuoteRepository:
             "work_title": work,
         }
 
-    def has_legacy_schema(self) -> bool:
-        with self.driver.session() as session:
-            record = session.run(
-                "MATCH (n) WHERE n:QuoteOccurrence OR n:Source "
-                "OR n:PrimaryQuote OR n:SecondaryQuote "
-                "RETURN count(n) > 0 AS legacy"
-            ).single()
-        return bool(record and record["legacy"])
-
     def verify_counts(self, model: str, dimensions: int) -> dict[str, int]:
         labels = (
             "Quote",
@@ -259,10 +250,6 @@ class Neo4jQuoteRepository:
             "Author",
             "Work",
             "WikiquotePage",
-            "QuoteOccurrence",
-            "Source",
-            "PrimaryQuote",
-            "SecondaryQuote",
         )
         counts: dict[str, int] = {}
         with self.driver.session() as session:

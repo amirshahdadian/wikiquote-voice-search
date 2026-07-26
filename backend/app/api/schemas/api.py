@@ -5,21 +5,12 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from backend.app.domain import QuoteHit
 
-class QuoteResult(BaseModel):
-    quote_id: str
-    quote_text: str
-    author_name: Optional[str] = None
-    source_title: Optional[str] = None
-    page_title: str
-    citation: Optional[str] = None
-    relevance_score: Optional[float] = None
-    search_type: Optional[str] = None
-    match_position: Optional[str] = None
+QuoteResult = QuoteHit
 
 
 class UserPreferences(BaseModel):
-    pitch_scale: float = Field(default=1.0, ge=0.5, le=2.0)
     speaking_rate: float = Field(default=1.0, ge=0.5, le=1.5)
     energy_scale: float = Field(default=1.0, ge=0.5, le=1.5)
     style: str = "neutral"
@@ -67,7 +58,6 @@ class ChatQueryResponse(BaseModel):
 
 class VoiceQueryResponse(ChatQueryResponse):
     transcript: str
-    normalized_transcript: str
 
 
 class TTSPreviewRequest(BaseModel):

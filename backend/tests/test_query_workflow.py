@@ -42,10 +42,7 @@ def test_topic_query_runs_interpret_retrieve_respond():
     workflow = build_query_workflow(FakeGemini(), FakeSearch())
 
     result = asyncio.run(
-        workflow.ainvoke(
-            {"message": "something about courage", "conversation_id": "c1"},
-            {"configurable": {"thread_id": "c1"}},
-        )
+        workflow.run("something about courage", "c1")
     )
 
     assert result["intent"].kind == "topic"
@@ -59,14 +56,8 @@ def test_attribution_followup_uses_previous_hit():
     workflow = build_query_workflow(FakeGemini(), FakeSearch())
 
     async def scenario():
-        await workflow.ainvoke(
-            {"message": "something about courage", "conversation_id": "c1"},
-            {"configurable": {"thread_id": "c1"}},
-        )
-        return await workflow.ainvoke(
-            {"message": "who said that?", "conversation_id": "c1"},
-            {"configurable": {"thread_id": "c1"}},
-        )
+        await workflow.run("something about courage", "c1")
+        return await workflow.run("who said that?", "c1")
 
     result = asyncio.run(scenario())
 
@@ -90,14 +81,8 @@ def test_alternative_advances_without_requerying():
     workflow = build_query_workflow(FakeGemini(), search)
 
     async def scenario():
-        await workflow.ainvoke(
-            {"message": "something about courage", "conversation_id": "c1"},
-            {"configurable": {"thread_id": "c1"}},
-        )
-        return await workflow.ainvoke(
-            {"message": "another one", "conversation_id": "c1"},
-            {"configurable": {"thread_id": "c1"}},
-        )
+        await workflow.run("something about courage", "c1")
+        return await workflow.run("another one", "c1")
 
     result = asyncio.run(scenario())
 
@@ -114,10 +99,7 @@ def test_empty_search_result_is_explicit():
     workflow = build_query_workflow(FakeGemini(), EmptySearch())
 
     result = asyncio.run(
-        workflow.ainvoke(
-            {"message": "something obscure", "conversation_id": "c1"},
-            {"configurable": {"thread_id": "c1"}},
-        )
+        workflow.run("something obscure", "c1")
     )
 
     assert result["warnings"] == ["no_quote_found"]
@@ -129,10 +111,7 @@ def test_conversation_memory_evicts_the_oldest_conversation():
 
     async def scenario():
         for thread_id in ("oldest", "middle", "newest"):
-            await workflow.ainvoke(
-                {"message": "something about courage"},
-                {"configurable": {"thread_id": thread_id}},
-            )
+            await workflow.run("something about courage", thread_id)
 
     asyncio.run(scenario())
 
@@ -144,10 +123,7 @@ def test_one_long_conversation_keeps_only_latest_bounded_state():
 
     async def scenario():
         for turn in range(50):
-            await workflow.ainvoke(
-                {"message": f"something about courage {turn}"},
-                {"configurable": {"thread_id": "same-thread"}},
-            )
+            await workflow.run(f"something about courage {turn}", "same-thread")
 
     asyncio.run(scenario())
 

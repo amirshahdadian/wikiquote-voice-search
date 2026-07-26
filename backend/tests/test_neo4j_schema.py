@@ -1,5 +1,7 @@
 from contextlib import contextmanager
 
+import pytest
+
 from backend.app.cli.maintenance import build_parser
 from backend.app.integrations.neo4j_repository import Neo4jQuoteRepository
 from backend.app.integrations.neo4j_schema import SCHEMA_STATEMENTS, ensure_schema
@@ -139,6 +141,8 @@ def test_maintenance_cli_has_explicit_graph_commands():
     assert parser.parse_args(["load"]).command == "load"
     assert parser.parse_args(["embed"]).command == "embed"
     assert parser.parse_args(["verify"]).command == "verify"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["load", "--allow-legacy-database"])
 
 
 def test_runtime_search_uses_only_fixed_semantic_index_queries():
@@ -162,15 +166,19 @@ def test_runtime_search_uses_only_fixed_semantic_index_queries():
     assert "matched_attribution.citation AS citation" in author
 
 
-def test_verification_reports_legacy_labels_and_stale_embeddings():
+def test_verification_reports_current_graph_and_stale_embeddings():
     repository = Neo4jQuoteRepository(driver=CountDriver())
 
     counts = repository.verify_counts("gemini-embedding-2", 768)
 
-    assert counts["QuoteOccurrence"] == 0
-    assert counts["Source"] == 0
-    assert counts["PrimaryQuote"] == 0
-    assert counts["SecondaryQuote"] == 0
+    assert set(counts) == {
+        "Quote",
+        "Attribution",
+        "Author",
+        "Work",
+        "WikiquotePage",
+        "quotes_without_current_embedding",
+    }
     assert counts["quotes_without_current_embedding"] == 2
     query, parameters = repository.driver.session_instance.calls[-1]
     assert "q.embedding_model <> $model" in query

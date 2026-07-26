@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import pytest
 
+from backend.app.integrations.audio import tts as tts_module
 from backend.app.integrations.audio.tts import TTSService
 
 
@@ -40,3 +41,18 @@ def test_kokoro_error_reaches_voice_service():
 
     with pytest.raises(RuntimeError, match="offline"):
         service.synthesize_personalized("hello")
+
+
+def test_tts_reuses_shared_preference_storage(monkeypatch, tmp_path):
+    expected = {
+        "speaking_rate": 0.8,
+        "energy_scale": 1.2,
+        "style": "bf_emma",
+    }
+    monkeypatch.setattr(
+        tts_module,
+        "get_tts_preferences",
+        lambda user_id, db_path: expected if user_id == "ada" else None,
+    )
+
+    assert TTSService(db_path=str(tmp_path / "users.db"))._preferences("ada") == expected

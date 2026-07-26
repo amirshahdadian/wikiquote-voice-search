@@ -8,7 +8,6 @@ from backend.app.container import AppContainer
 from backend.app.domain import QuoteHit, SearchIntent
 from backend.app.core.settings import Settings
 from backend.app.services.conversation import ConversationService
-from backend.app.services.quote_search import QuoteSearchService
 from backend.app.services.voice import VoiceService
 
 
@@ -46,42 +45,32 @@ class FakeRepository:
         pass
 
 
-@pytest.mark.asyncio
-async def test_quote_service_uses_hybrid_search_and_serializes_provenance():
-    hybrid = FakeSearch()
-    service = QuoteSearchService(FakeRepository(), hybrid)
-
-    results = await service.search_quotes("software simplicity", limit=3)
-
-    assert hybrid.intent == SearchIntent(
-        kind="topic", search_text="software simplicity", limit=3
-    )
-    assert results == [
-        {
-            "quote_id": "quote-1",
-            "quote_text": "Simplicity is prerequisite for reliability.",
-            "author_name": "Edsger Dijkstra",
-            "source_title": None,
-            "page_title": "Edsger W. Dijkstra",
-            "citation": "EWD 498",
-            "relevance_score": 0.91,
-            "search_type": "hybrid",
-        }
-    ]
+def test_quote_hit_uses_public_api_field_names_when_serialized():
+    assert HIT.model_dump(by_alias=True) == {
+        "quote_id": "quote-1",
+        "quote_text": "Simplicity is prerequisite for reliability.",
+        "author_name": "Edsger Dijkstra",
+        "source_title": None,
+        "citation": "EWD 498",
+        "page_title": "Edsger W. Dijkstra",
+        "relevance_score": 0.91,
+        "search_type": "hybrid",
+    }
 
 
 class FakeWorkflow:
     def __init__(self):
-        self.input = None
-        self.config = None
+        self.message = None
+        self.conversation_id = None
 
-    async def ainvoke(self, payload, config):
-        self.input = payload
-        self.config = config
+    async def run(self, message, conversation_id):
+        self.message = message
+        self.conversation_id = conversation_id
         return {
-            **payload,
+            "message": message,
+            "conversation_id": conversation_id,
             "intent": SearchIntent(
-                kind="topic", search_text=payload["message"], limit=5
+                kind="topic", search_text=message, limit=5
             ),
             "hits": [HIT],
             "result_index": 0,
@@ -121,13 +110,8 @@ async def test_conversation_service_invokes_one_workflow_thread():
         selected_user_id="known",
     )
 
-    assert workflow.input == {
-        "message": "a quote about simplicity",
-        "conversation_id": "conversation-1",
-    }
-    assert workflow.config == {
-        "configurable": {"thread_id": "conversation-1"}
-    }
+    assert workflow.message == "a quote about simplicity"
+    assert workflow.conversation_id == "conversation-1"
     assert result["intent_type"] == "topic"
     assert result["best_quote"]["quote_id"] == "quote-1"
     assert result["best_quote"]["author_name"] == "Edsger Dijkstra"
@@ -172,9 +156,7 @@ def test_health_reports_unreachable_neo4j_as_not_ready():
             return {"search": search_ready}
 
     container = object.__new__(AppContainer)
-    container.quote_search = SimpleNamespace(
-        repository=SimpleNamespace(is_ready=lambda: False)
-    )
+    container.repository = SimpleNamespace(is_ready=lambda: False)
     container.voice = HealthVoice()
 
     assert container.health_flags()["search"] is False

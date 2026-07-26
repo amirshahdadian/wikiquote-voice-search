@@ -21,5 +21,6 @@ def test_transcription_is_not_rewritten_or_logged(monkeypatch, caplog):
     with caplog.at_level(logging.INFO):
         result = ASRService().transcribe("sample.wav")
 
-    assert result["normalized_text"] == transcript
+    assert result["text"] == transcript
+    assert "normalized_text" not in result
     assert transcript not in caplog.text

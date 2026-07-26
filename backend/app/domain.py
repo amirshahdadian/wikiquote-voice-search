@@ -26,10 +26,10 @@ class QuoteHit(BaseModel):
     quote_id: str
     quote_text: str
     author_name: str | None = None
-    work_title: str | None = None
+    work_title: str | None = Field(default=None, serialization_alias="source_title")
     citation: str | None = None
     page_title: str
-    score: float
+    score: float = Field(serialization_alias="relevance_score")
     search_type: str
 
 

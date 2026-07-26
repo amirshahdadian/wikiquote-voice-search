@@ -9,7 +9,7 @@ from backend.app.main import create_app
 
 
 class StubQuoteSearch:
-    async def search_quotes(self, query: str, limit: int = 5):
+    async def search_text(self, query: str, limit: int = 5):
         return [
             {
                 "quote_id": "quote-1",
@@ -21,20 +21,8 @@ class StubQuoteSearch:
             }
         ][:limit]
 
-    async def search_by_theme(self, theme: str, limit: int = 10):
-        return await self.search_quotes(theme, limit)
-
     def autocomplete(self, query: str, limit: int = 5):
-        return self.search_quotes(query, limit)
-
-    async def intelligent_search(self, query: str, limit: int = 10):
-        return await self.search_quotes(query, limit)
-
-    async def voice_search(self, query: str, limit: int = 3):
-        return await self.search_quotes(query, limit)
-
-    def close(self):
-        return None
+        return []
 
 
 class StubUsers:
@@ -78,7 +66,7 @@ class StubConversation:
 
 class StubContainer:
     def __init__(self):
-        self.quote_search = StubQuoteSearch()
+        self.search = StubQuoteSearch()
         self.users = StubUsers()
         self.voice = StubVoice()
         self.conversation = StubConversation()

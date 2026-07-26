@@ -16,7 +16,6 @@ from backend.app.integrations.sqlite_users import (
     get_tts_preferences,
     get_user_profile,
     initialize_database,
-    list_tts_preference_users,
     list_user_profiles,
     save_tts_preferences,
     save_user_profile,
@@ -115,11 +114,9 @@ class UserService:
         }
 
     def _compose_user_profile(self, user_id: str) -> dict[str, Any]:
-        profile = get_user_profile(user_id, self.settings.resolved_db_path) or {
-            "user_id": user_id,
-            "display_name": user_id,
-            "group_identifier": None,
-        }
+        profile = get_user_profile(user_id, self.settings.resolved_db_path)
+        if profile is None:
+            raise KeyError(f"Unknown user '{user_id}'")
         preferences = get_tts_preferences(user_id, self.settings.resolved_db_path)
         return {
             "user_id": user_id,
@@ -140,10 +137,10 @@ class UserService:
         return random.choice(pool)
 
     def _all_known_user_ids(self) -> list[str]:
-        user_ids = {profile["user_id"] for profile in list_user_profiles(self.settings.resolved_db_path)}
-        user_ids.update(list_tts_preference_users(self.settings.resolved_db_path))
-        user_ids.update(path.stem for path in self.settings.embeddings_dir.glob("*.pkl"))
-        return sorted(user_ids)
+        return [
+            profile["user_id"]
+            for profile in list_user_profiles(self.settings.resolved_db_path)
+        ]
 
     @staticmethod
     def _slugify_user_id(display_name: str) -> str:

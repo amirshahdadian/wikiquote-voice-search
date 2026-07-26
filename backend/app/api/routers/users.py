@@ -27,7 +27,6 @@ def get_user(user_id: str, user_service: UserService = Depends(get_user_service)
 async def register_user(
     display_name: str = Form(...),
     group_identifier: str | None = Form(default=None),
-    pitch_scale: float = Form(default=1.0),
     speaking_rate: float = Form(default=1.0),
     energy_scale: float = Form(default=1.0),
     audio_samples: list[UploadFile] = File(...),
@@ -37,7 +36,6 @@ async def register_user(
         raise HTTPException(status_code=400, detail="At least 3 audio samples are required")
 
     preferences = UserPreferences(
-        pitch_scale=pitch_scale,
         speaking_rate=speaking_rate,
         energy_scale=energy_scale,
     ).model_dump()
