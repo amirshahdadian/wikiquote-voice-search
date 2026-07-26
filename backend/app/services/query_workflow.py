@@ -1,14 +1,37 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
 
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from backend.app.domain import QueryState
 
 
-def build_query_workflow(gemini: Any, search: Any):
+class BoundedQueryWorkflow:
+    """Keep only the latest bounded state for each recent conversation."""
+
+    def __init__(self, graph: Any, max_threads: int):
+        self.graph = graph
+        self.max_threads = max_threads
+        self.states: OrderedDict[str, QueryState] = OrderedDict()
+
+    async def ainvoke(self, payload: QueryState, config: dict[str, Any]):
+        thread_id = config["configurable"]["thread_id"]
+        previous = self.states.pop(thread_id, {})
+        result = await self.graph.ainvoke({**previous, **payload}, config)
+        self.states[thread_id] = result
+        while len(self.states) > self.max_threads:
+            self.states.popitem(last=False)
+        return result
+
+
+def build_query_workflow(
+    gemini: Any,
+    search: Any,
+    *,
+    max_threads: int = 1000,
+):
     async def interpret(state: QueryState) -> QueryState:
         intent = await gemini.interpret(
             state["message"],
@@ -71,4 +94,4 @@ def build_query_workflow(gemini: Any, search: Any):
     builder.add_edge("interpret", "retrieve")
     builder.add_edge("retrieve", "respond")
     builder.add_edge("respond", END)
-    return builder.compile(checkpointer=InMemorySaver())
+    return BoundedQueryWorkflow(builder.compile(), max_threads)

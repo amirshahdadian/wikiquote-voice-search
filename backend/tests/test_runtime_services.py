@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
+from backend.app.container import AppContainer
 from backend.app.domain import QuoteHit, SearchIntent
 from backend.app.core.settings import Settings
 from backend.app.services.conversation import ConversationService
@@ -161,3 +164,17 @@ def test_voice_service_reports_kokoro_unavailable_without_network_fallback(
         None,
         ["tts_unavailable"],
     )
+
+
+def test_health_reports_unreachable_neo4j_as_not_ready():
+    class HealthVoice:
+        def health_flags(self, search_ready):
+            return {"search": search_ready}
+
+    container = object.__new__(AppContainer)
+    container.quote_search = SimpleNamespace(
+        repository=SimpleNamespace(is_ready=lambda: False)
+    )
+    container.voice = HealthVoice()
+
+    assert container.health_flags()["search"] is False

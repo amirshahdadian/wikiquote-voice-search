@@ -34,6 +34,14 @@ class CountResult:
         return {"count": self.count}
 
 
+class IndexResult:
+    def __init__(self, online):
+        self.online = online
+
+    def single(self):
+        return {"online": self.online}
+
+
 class CountSession:
     def __init__(self):
         self.calls = []
@@ -53,6 +61,24 @@ class CountDriver:
 
     def close(self):
         pass
+
+
+class IndexDriver:
+    def __init__(self, online):
+        self.online = online
+        self.connected = False
+
+    def verify_connectivity(self):
+        self.connected = True
+
+    @contextmanager
+    def session(self):
+        yield self
+
+    def run(self, query, **parameters):
+        self.query = query
+        self.parameters = parameters
+        return IndexResult(self.online)
 
 
 def test_schema_has_only_explainable_constraints_and_indexes():
@@ -132,6 +158,8 @@ def test_runtime_search_uses_only_fixed_semantic_index_queries():
     assert "db.index.fulltext.queryNodes('author_name'" in author
     assert "db.index.fulltext.queryNodes('quote_text'" in autocomplete
     assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, author, autocomplete))
+    assert "matched_author.name AS author_name" in author
+    assert "matched_attribution.citation AS citation" in author
 
 
 def test_verification_reports_legacy_labels_and_stale_embeddings():
@@ -147,3 +175,17 @@ def test_verification_reports_legacy_labels_and_stale_embeddings():
     query, parameters = repository.driver.session_instance.calls[-1]
     assert "q.embedding_model <> $model" in query
     assert parameters == {"model": "gemini-embedding-2", "dimensions": 768}
+
+
+def test_readiness_requires_all_search_indexes_online():
+    ready_driver = IndexDriver(3)
+    incomplete_driver = IndexDriver(2)
+
+    assert Neo4jQuoteRepository(driver=ready_driver).is_ready() is True
+    assert Neo4jQuoteRepository(driver=incomplete_driver).is_ready() is False
+    assert ready_driver.connected is True
+    assert ready_driver.parameters["names"] == [
+        "quote_text",
+        "author_name",
+        "quote_embedding",
+    ]

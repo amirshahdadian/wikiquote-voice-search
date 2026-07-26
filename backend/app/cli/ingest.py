@@ -261,7 +261,18 @@ class MWParserQuoteExtractor:
             attribution = re.match(r"^\*{2,}\s*(.+)$", raw_line.strip())
             if attribution and pending:
                 citation = attribution.group(1)
-                author, work, locator, year = self._parse_attribution(citation)
+                infer_author = (
+                    metadata.page_type == "theme"
+                    or pending.quote_type == "about"
+                    or (
+                        metadata.page_type == "literary_work"
+                        and bool(re.search(r"''+\s*\[\[", citation))
+                    )
+                )
+                author, work, locator, year = self._parse_attribution(
+                    citation,
+                    infer_author=infer_author,
+                )
                 pending.author = author or pending.author
                 pending.work = work or pending.work
                 pending.source_locator = locator
@@ -289,7 +300,10 @@ class MWParserQuoteExtractor:
         return results
 
     def _parse_attribution(
-        self, text: str
+        self,
+        text: str,
+        *,
+        infer_author: bool = True,
     ) -> tuple[str | None, str | None, str | None, str | None]:
         italic_links = [
             self._link_text(match)
@@ -301,9 +315,10 @@ class MWParserQuoteExtractor:
             self._link_text(match)
             for match in re.findall(r"\[\[([^\]]+)\]\]", text)
         ]
-        author = next(
-            (link for link in links if link not in italic_links),
-            None,
+        author = (
+            next((link for link in links if link not in italic_links), None)
+            if infer_author
+            else None
         )
         work = italic_links[0] if italic_links else None
 
@@ -359,9 +374,25 @@ class MWParserQuoteExtractor:
         category_text = " ".join(categories).casefold()
         if "film" in category_text:
             return PageMetadata(title, "film", None, title)
-        if any(label in category_text for label in ("literary work", "books", "plays")):
+        work_category = re.search(
+            r"\b(?:books?|novels?|plays?|tragedy|tragedies|comedy|comedies|"
+            r"literary works?|poems?|works by)\b",
+            category_text,
+        )
+        if work_category:
             return PageMetadata(title, "literary_work", None, title)
-        if any(label in category_text for label in ("people", "persons")):
+        dated_person = re.search(
+            r"\b(?:1\d{3}|20\d{2}) (?:births|deaths)\b",
+            category_text,
+        )
+        has_sort_name = re.search(
+            r"\{\{\s*defaultsort\s*:",
+            wikitext,
+            re.IGNORECASE,
+        )
+        if dated_person or has_sort_name or any(
+            label in category_text for label in ("people", "persons")
+        ):
             return PageMetadata(title, "person", title, None)
         return PageMetadata(title, "theme", None, None)
 

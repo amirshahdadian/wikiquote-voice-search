@@ -57,7 +57,7 @@ class AppContainer:
         )
 
     def health_flags(self) -> dict[str, bool]:
-        ready = self.quote_search.repository.driver is not None
+        ready = self.quote_search.repository.is_ready()
         return self.voice.health_flags(search_ready=ready)
 
     def close(self) -> None:

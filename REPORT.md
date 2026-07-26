@@ -64,8 +64,9 @@ share one `Quote`, while separate Wikiquote claims remain separate
 `Attribution` nodes.
 
 A 20-page golden fixture covers person, theme, literary work, film, disputed,
-about, malformed, and duplicate cases. The extractor is 494 lines. The prior
-file was 2,047 lines.
+about, malformed, and duplicate cases. Four more cases use structural markers
+from current raw pages for Albert Einstein, Maya Angelou, William Shakespeare,
+and Hamlet. The extractor is 525 lines. The prior file was 2,047 lines.
 
 ## 3. Graph model
 
@@ -161,9 +162,10 @@ LangGraph runs three nodes:
 2. `retrieve` calls the fixed hybrid search service;
 3. `respond` formats a short response from retrieved fields.
 
-The graph uses an in-memory checkpoint keyed by conversation ID. Repeat,
-alternative, and attribution follow-ups reuse prior results. The state keeps
-only the recent conversation history.
+The graph uses a small in-memory state store keyed by conversation ID. Repeat,
+alternative, and attribution follow-ups reuse the latest result. Each thread
+stores one final state with eight history messages, and a least-recently-used
+cap keeps no more than 1,000 threads in process memory.
 
 This is orchestration, not an autonomous agent. There is no planner loop, tool
 catalog, generated query language, or open-ended model response. A more
@@ -196,9 +198,10 @@ microphone input, selected users, recognized users, related quotations, source
 provenance, and audio playback. Registration and user administration have
 their own focused routes.
 
-The quote API has canonical search and autocomplete endpoints. Chat and voice
-requests share the same workflow, so they cannot drift into separate search
-implementations.
+The quote API has canonical search and autocomplete endpoints. The frontend
+debounces typed fragments and displays lexical suggestions without calling
+Gemini. Chat and voice requests share the same workflow, so they cannot drift
+into separate search implementations.
 
 ## 9. Cost and data handling
 
@@ -248,9 +251,9 @@ pretend that a skipped network test is a quality result.
 ## 11. Code reduction
 
 The deterministic extraction, search, and conversation group measured 4,027
-lines before the redesign. Its direct replacement is 1,505 lines, a reduction
-of about 63 percent. Production Python, TypeScript, TSX, and CSS across the
-repository fell from 11,924 to 6,306 lines, a reduction of about 47 percent.
+lines before the redesign. Its direct replacement is 1,591 lines, a reduction
+of about 61 percent. Production Python, TypeScript, TSX, and CSS across the
+repository fell from 11,924 to 6,454 lines, a reduction of about 46 percent.
 Most of the removed code was heuristic classification,
 manual relevance scoring, duplicate endpoint logic, and compatibility code for
 the old graph.

@@ -28,10 +28,12 @@ import {
 import type {
   ChatQueryResponse,
   HealthStatus,
+  QuoteResult,
   UserProfile,
   VoiceQueryResponse,
 } from "@/lib/types";
 import {
+  autocompleteQuotes,
   fetchHealth,
   resolveApiUrl,
   sendChatQuery,
@@ -351,12 +353,15 @@ interface InputFormProps {
   onVoiceClick: () => void;
   onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
+  suggestions: QuoteResult[];
+  onSelectSuggestion: (suggestion: QuoteResult) => void;
   large?: boolean;
 }
 
 function InputForm({
   query, setQuery, isLoading, voiceState,
   onSubmit, onVoiceClick, onKeyDown, inputRef,
+  suggestions, onSelectSuggestion,
   large = false,
 }: InputFormProps) {
   const inputPy  = large ? "py-5"    : "py-4";
@@ -440,6 +445,30 @@ function InputForm({
             </svg>
           )}
         </button>
+        {suggestions.length > 0 && (
+          <div
+            className="absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden rounded-xl border border-white/[0.10] bg-[#11121d] shadow-glass-lg"
+            role="listbox"
+          >
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion.quote_id}
+                type="button"
+                onClick={() => onSelectSuggestion(suggestion)}
+                className="block w-full border-b border-white/[0.06] px-4 py-3 text-left last:border-b-0 hover:bg-white/[0.06]"
+              >
+                <span className="block truncate text-sm text-white/80">
+                  {suggestion.quote_text}
+                </span>
+                {suggestion.author_name && (
+                  <span className="mt-1 block text-xs text-white/35">
+                    {suggestion.author_name}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </form>
   );
@@ -458,6 +487,7 @@ export default function MainShell({ initialUsers }: MainShellProps) {
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [selectedUserId, setSelectedUserId] = useState<string | undefined>();
   const [isLoading, setIsLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<QuoteResult[]>([]);
 
   // Voice state
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
@@ -479,6 +509,23 @@ export default function MainShell({ initialUsers }: MainShellProps) {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const text = query.trim();
+    if (text.length < 3 || isLoading) {
+      setSuggestions([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      const matches = await autocompleteQuotes(text, 5, controller.signal);
+      if (!controller.signal.aborted) setSuggestions(matches);
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, isLoading]);
 
   // ── Health poll ────────────────────────────────────────────────────────────
 
@@ -566,6 +613,13 @@ export default function MainShell({ initialUsers }: MainShellProps) {
     if (!query.trim()) return;
     sendTextQuery(query);
     setQuery("");
+    setSuggestions([]);
+  }
+
+  function selectSuggestion(suggestion: QuoteResult) {
+    setQuery(suggestion.quote_text);
+    setSuggestions([]);
+    inputRef.current?.focus();
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -888,6 +942,8 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                     onVoiceClick={handleVoiceButtonClick}
                     onKeyDown={handleKeyDown}
                     inputRef={inputRef}
+                    suggestions={suggestions}
+                    onSelectSuggestion={selectSuggestion}
                   />
                   {voiceState !== "idle" && (
                     <p className="text-center text-base mt-3">
@@ -975,6 +1031,8 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                     onVoiceClick={handleVoiceButtonClick}
                     onKeyDown={handleKeyDown}
                     inputRef={inputRef}
+                    suggestions={suggestions}
+                    onSelectSuggestion={selectSuggestion}
                   />
                   {voiceState !== "idle" && (
                     <p className="text-center text-[11px] mt-2">

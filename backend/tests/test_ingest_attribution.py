@@ -96,3 +96,64 @@ def test_validation_is_deliberately_small():
     )
     assert not extractor._is_valid_quote("Too short.")
     assert not extractor._is_valid_quote("1234567890 1234567890 1234567890")
+
+
+@pytest.mark.parametrize(
+    ("title", "wikitext", "page_type", "author", "work"),
+    [
+        (
+            "Albert Einstein",
+            """{{DEFAULTSORT:Einstein, Albert}}
+            == Scientific work ==
+            * Imagination is more important than knowledge, because knowledge is limited.
+            ** ''[[Annus Mirabilis papers]]'' (1905).
+            [[Category:Albert Einstein| ]]""",
+            "person",
+            "Albert Einstein",
+            "Annus Mirabilis papers",
+        ),
+        (
+            "Maya Angelou",
+            """== Books ==
+            * There is no greater agony than bearing an untold story inside you.
+            ** ''[[Gather Together in My Name]]'' (1974).
+            [[Category:1928 births]]
+            [[Category:2014 deaths]]""",
+            "person",
+            "Maya Angelou",
+            "Gather Together in My Name",
+        ),
+        (
+            "William Shakespeare",
+            """== Quotes ==
+            * All the world's a stage, and all the men and women merely players.
+            ** ''[[As You Like It]]'', Act II, scene vii.
+            [[Category:1564 births]]
+            [[Category:1616 deaths]]
+            [[Category:Playwrights from England]]""",
+            "person",
+            "William Shakespeare",
+            "As You Like It",
+        ),
+        (
+            "Hamlet",
+            """{{italic title}}
+            == Hamlet ==
+            * There are more things in heaven and earth than are dreamt of in our philosophy.
+            ** [[First Folio]] (1623).
+            [[Category:Shakespearean tragedies]]""",
+            "literary_work",
+            None,
+            "Hamlet",
+        ),
+    ],
+)
+def test_real_page_structure_keeps_page_identity(
+    title, wikitext, page_type, author, work
+):
+    rows = MWParserQuoteExtractor().extract_page(title, 1, 2, wikitext)
+
+    assert rows
+    assert rows[0].page_type == page_type
+    assert rows[0].author == author
+    assert rows[0].work == work

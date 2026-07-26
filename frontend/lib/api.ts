@@ -172,11 +172,16 @@ export async function searchQuotes(query: string, limit = 5): Promise<QuoteResul
   );
 }
 
-export async function autocompleteQuotes(query: string, limit = 5): Promise<QuoteResult[]> {
+export async function autocompleteQuotes(
+  query: string,
+  limit = 5,
+  signal?: AbortSignal,
+): Promise<QuoteResult[]> {
   if (!query.trim()) return [];
   try {
     return await requestJson<QuoteResult[]>(
-      `/api/quotes/autocomplete?query=${encodeURIComponent(query)}&limit=${limit}`
+      `/api/quotes/autocomplete?query=${encodeURIComponent(query)}&limit=${limit}`,
+      { signal },
     );
   } catch {
     return [];

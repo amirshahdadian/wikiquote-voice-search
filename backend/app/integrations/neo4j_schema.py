@@ -47,4 +47,3 @@ SCHEMA_STATEMENTS = [
 def ensure_schema(session: Any) -> None:
     for statement in SCHEMA_STATEMENTS:
         session.run(statement)
-

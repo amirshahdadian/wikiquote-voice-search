@@ -13,7 +13,11 @@ from backend.app.integrations.gemini import (
 
 
 class FakeModels:
+    def __init__(self):
+        self.last_contents = None
+
     async def generate_content(self, **kwargs):
+        self.last_contents = kwargs["contents"]
         return SimpleNamespace(
             parsed=SearchIntent(kind="author", search_text="Virginia Woolf", limit=5)
         )
@@ -25,7 +29,8 @@ class FakeModels:
 
 class FakeClient:
     def __init__(self):
-        self.aio = SimpleNamespace(models=FakeModels())
+        self.models = FakeModels()
+        self.aio = SimpleNamespace(models=self.models)
 
 
 def test_embedding_formats_match_gemini_embedding_2_docs():
@@ -34,14 +39,26 @@ def test_embedding_formats_match_gemini_embedding_2_docs():
 
 
 def test_interpret_returns_validated_schema():
-    service = GeminiService(
-        FakeClient(), "gemini-3.5-flash-lite", "gemini-embedding-2", 768
-    )
+    client = FakeClient()
+    service = GeminiService(client, "gemini-3.5-flash-lite", "gemini-embedding-2", 768)
 
-    intent = asyncio.run(service.interpret("quotes by Virginia Woolf", []))
+    intent = asyncio.run(
+        service.interpret(
+            "quotes by Virginia Woolf",
+            [
+                {"role": "user", "content": "find something about courage"},
+                {
+                    "role": "assistant",
+                    "content": "A quotation that should stay out of the intent prompt",
+                },
+            ],
+        )
+    )
 
     assert intent.kind == "author"
     assert intent.search_text == "Virginia Woolf"
+    assert "find something about courage" in client.models.last_contents
+    assert "A quotation that should stay out" not in client.models.last_contents
 
 
 def test_missing_client_falls_back_to_topic_intent():

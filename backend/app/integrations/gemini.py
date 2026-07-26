@@ -62,7 +62,9 @@ class GeminiService:
             )
             return fallback
 
-        recent_context = context[-4:]
+        recent_context = [
+            item for item in context if item["role"] == "user"
+        ][-2:]
         prompt = "\n".join(
             [f'{item["role"]}: {item["content"]}' for item in recent_context]
             + [f"user: {message}"]

@@ -43,7 +43,9 @@ topic search still returns full-text results.
 
 LangGraph holds conversation state and runs three nodes: `interpret`,
 `retrieve`, and `respond`. It is a bounded workflow, not an autonomous agent.
-It cannot choose tools, create new steps, or execute model output.
+It cannot choose tools, create new steps, or execute model output. Its local
+state store keeps one bounded state for at most 1,000 recently used
+conversation threads.
 
 Voice transcripts enter this same workflow unchanged. There is no separate
 list of filler words, command patterns, or hand-written voice search parser.
@@ -172,6 +174,9 @@ npm run dev
 
 The API is at `http://127.0.0.1:8000` and the web interface is at
 `http://127.0.0.1:3000`.
+
+Typing three or more characters opens quote completions from the lexical
+Neo4j index. This path is debounced in the browser and does not call Gemini.
 
 ## Test
 

@@ -122,3 +122,34 @@ def test_empty_search_result_is_explicit():
 
     assert result["warnings"] == ["no_quote_found"]
     assert result["response_text"] == 'I could not find a reliable match for "courage".'
+
+
+def test_conversation_memory_evicts_the_oldest_conversation():
+    workflow = build_query_workflow(FakeGemini(), FakeSearch(), max_threads=2)
+
+    async def scenario():
+        for thread_id in ("oldest", "middle", "newest"):
+            await workflow.ainvoke(
+                {"message": "something about courage"},
+                {"configurable": {"thread_id": thread_id}},
+            )
+
+    asyncio.run(scenario())
+
+    assert set(workflow.states) == {"middle", "newest"}
+
+
+def test_one_long_conversation_keeps_only_latest_bounded_state():
+    workflow = build_query_workflow(FakeGemini(), FakeSearch(), max_threads=2)
+
+    async def scenario():
+        for turn in range(50):
+            await workflow.ainvoke(
+                {"message": f"something about courage {turn}"},
+                {"configurable": {"thread_id": "same-thread"}},
+            )
+
+    asyncio.run(scenario())
+
+    assert list(workflow.states) == ["same-thread"]
+    assert len(workflow.states["same-thread"]["history"]) == 8

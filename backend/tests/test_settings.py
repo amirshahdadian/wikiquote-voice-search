@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from backend.app.core.settings import Settings
 
 
@@ -14,3 +17,8 @@ def test_api_key_is_optional_for_lexical_only_startup():
     app_settings = Settings(_env_file=None)
 
     assert app_settings.gemini_api_key is None
+
+
+def test_embedding_dimensions_match_the_fixed_neo4j_index():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, gemini_embedding_dimensions=512)

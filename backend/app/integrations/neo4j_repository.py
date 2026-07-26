@@ -89,22 +89,36 @@ LIMIT $limit
 """
 )
 
-_AUTHOR_QUERY = (
-    """
+_AUTHOR_QUERY = """
 CALL db.index.fulltext.queryNodes('author_name', $query, {limit: 5})
 YIELD node AS matched_author, score
 MATCH (q:Quote)-[:HAS_ATTRIBUTION]->(matched_attribution:Attribution)
       -[:ATTRIBUTED_TO]->(matched_author)
-WITH DISTINCT q, score
-"""
-    + _ATTRIBUTION_SUBQUERY
-    + """
+WITH DISTINCT q, matched_author, score
+CALL {
+  WITH q, matched_author
+  MATCH (q)-[:HAS_ATTRIBUTION]->(matched_attribution:Attribution)
+        -[:ATTRIBUTED_TO]->(matched_author)
+  MATCH (matched_attribution)-[:FOUND_ON]->(matched_page:WikiquotePage)
+  OPTIONAL MATCH (matched_attribution)-[:FROM_WORK]->(matched_work:Work)
+  WITH matched_author, matched_attribution, matched_page, matched_work
+  ORDER BY CASE matched_attribution.status
+    WHEN 'sourced' THEN 0
+    WHEN 'attributed' THEN 1
+    WHEN 'disputed' THEN 2
+    ELSE 3
+  END, matched_page.title
+  RETURN matched_author.name AS author_name,
+         matched_work.title AS work_title,
+         matched_attribution.citation AS citation,
+         matched_page.title AS page_title
+  LIMIT 1
+}
 RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
        citation, page_title, score
 ORDER BY score DESC, quote_text
 LIMIT $limit
 """
-)
 
 _AUTOCOMPLETE_QUERY = (
     """
@@ -160,6 +174,22 @@ class Neo4jQuoteRepository:
     def ensure_schema(self) -> None:
         with self.driver.session() as session:
             ensure_schema(session)
+
+    def is_ready(self) -> bool:
+        try:
+            self.driver.verify_connectivity()
+            with self.driver.session() as session:
+                record = session.run(
+                    """
+                    SHOW INDEXES YIELD name, state
+                    WHERE name IN $names AND state = 'ONLINE'
+                    RETURN count(*) AS online
+                    """,
+                    names=["quote_text", "author_name", "quote_embedding"],
+                ).single()
+            return bool(record and record["online"] == 3)
+        except Exception:
+            return False
 
     def load(self, rows: Iterable[dict[str, Any]], batch_size: int = 1000) -> None:
         batch: list[dict[str, Any]] = []
