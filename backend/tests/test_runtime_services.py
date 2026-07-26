@@ -23,28 +23,6 @@ HIT = QuoteHit(
 )
 
 
-class FakeSearch:
-    def __init__(self):
-        self.intent = None
-
-    async def search(self, intent):
-        self.intent = intent
-        return [HIT]
-
-
-class FakeRepository:
-    driver = object()
-
-    def autocomplete(self, text, limit):
-        return [HIT]
-
-    def random_quote(self):
-        return HIT
-
-    def close(self):
-        pass
-
-
 def test_quote_hit_uses_public_api_field_names_when_serialized():
     assert HIT.model_dump(by_alias=True) == {
         "quote_id": "quote-1",
