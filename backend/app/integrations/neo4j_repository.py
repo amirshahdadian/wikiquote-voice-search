@@ -351,16 +351,6 @@ RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
         hits = self._query_hits(query, search_type="random")
         return hits[0] if hits else None
 
-    def popular_authors(self, limit: int) -> list[dict[str, Any]]:
-        query = """
-        MATCH (q:Quote)-[:HAS_ATTRIBUTION]->(:Attribution)-[:ATTRIBUTED_TO]->(a:Author)
-        RETURN a.name AS author_name, count(DISTINCT q) AS quote_count
-        ORDER BY quote_count DESC, author_name
-        LIMIT $limit
-        """
-        with self.driver.session() as session:
-            return [dict(record) for record in session.run(query, limit=limit)]
-
     def _query_hits(
         self, cypher: str, *, search_type: str, **parameters: Any
     ) -> list[QuoteHit]:

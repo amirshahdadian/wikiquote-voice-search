@@ -18,11 +18,6 @@ class QuoteResult(BaseModel):
     match_position: Optional[str] = None
 
 
-class AuthorResult(BaseModel):
-    author_name: str
-    quote_count: int
-
-
 class UserPreferences(BaseModel):
     pitch_scale: float = Field(default=1.0, ge=0.5, le=2.0)
     speaking_rate: float = Field(default=1.0, ge=0.5, le=1.5)

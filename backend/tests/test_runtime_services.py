@@ -39,9 +39,6 @@ class FakeRepository:
     def random_quote(self):
         return HIT
 
-    def popular_authors(self, limit):
-        return [{"author_name": "Edsger Dijkstra", "quote_count": 1}]
-
     def close(self):
         pass
 

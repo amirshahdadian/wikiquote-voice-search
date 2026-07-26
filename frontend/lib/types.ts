@@ -1,8 +1,3 @@
-export type AuthorResult = {
-  author_name: string;
-  quote_count: number;
-};
-
 export type QuoteResult = {
   quote_id: string;
   quote_text: string;

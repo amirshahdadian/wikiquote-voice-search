@@ -25,13 +25,6 @@ class QuoteSearchService:
             for hit in self.repository.autocomplete(query, limit)
         ]
 
-    def get_random_quote(self) -> dict[str, Any] | None:
-        hit = self.repository.random_quote()
-        return self._serialize(hit) if hit else None
-
-    def get_popular_authors(self, limit: int = 20) -> list[dict[str, Any]]:
-        return self.repository.popular_authors(limit)
-
     def close(self) -> None:
         self.repository.close()
 

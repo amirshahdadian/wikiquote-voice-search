@@ -50,19 +50,6 @@ async def register_user(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.put("/{user_id}/preferences", response_model=UserProfile)
-def update_preferences(
-    user_id: str,
-    preferences: UserPreferences,
-    user_service: UserService = Depends(get_user_service),
-) -> UserProfile:
-    try:
-        user = user_service.update_user_preferences(user_id, preferences.model_dump())
-        return UserProfile(**user)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
 @router.post("/{user_id}/re-enroll", response_model=UserProfile)
 async def re_enroll_user(
     user_id: str,

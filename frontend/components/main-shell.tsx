@@ -9,16 +9,12 @@ import {
   Fingerprint,
   Loader2,
   Mic,
-  MicOff,
   Plus,
   Quote,
   Square,
-  Trash2,
-  Upload,
   User,
   Users,
   Volume2,
-  X,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,20 +22,17 @@ import {
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 import type {
   ChatQueryResponse,
   HealthStatus,
-  UserPreferences,
   UserProfile,
   VoiceQueryResponse,
 } from "@/lib/types";
 import {
   fetchHealth,
-  registerUser,
   resolveApiUrl,
   sendChatQuery,
   sendVoiceQuery as requestVoiceQuery,
@@ -53,13 +46,6 @@ const cn = (...classes: (string | false | null | undefined)[]) =>
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type VoiceState = "idle" | "listening" | "processing";
-
-interface RecordedSample {
-  id: string;
-  blob: Blob;
-  url: string;
-  name: string;
-}
 
 interface ChatMessage {
   id: string;
@@ -479,12 +465,9 @@ export default function MainShell({ initialUsers }: MainShellProps) {
   const audioChunksRef = useRef<Blob[]>([]);
 
   // Users / health
-  const [users, setUsers] = useState<UserProfile[]>(initialUsers);
+  const users = initialUsers;
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-
-  // Register modal
-  const [showRegister, setShowRegister] = useState(false);
 
   // Refs
   const inputRef = useRef<HTMLInputElement>(null);
@@ -820,14 +803,14 @@ export default function MainShell({ initialUsers }: MainShellProps) {
           </Link>
 
           {/* Add user */}
-          <button
-            onClick={() => setShowRegister(true)}
+          <Link
+            href="/register"
             className="btn-primary py-1.5 px-3 text-xs"
             title="Register new user"
           >
             <Plus size={13} />
             <span className="hidden sm:block">Add user</span>
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -1010,347 +993,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
         </AnimatePresence>
       </LayoutGroup>
 
-      {/* ── Register modal ── */}
-      <AnimatePresence>
-        {showRegister && (
-          <RegisterModal
-            onClose={() => setShowRegister(false)}
-            onSuccess={(user) => {
-              setUsers((prev) => [...prev, user]);
-              setSelectedUserId(user.user_id);
-              setShowRegister(false);
-            }}
-          />
-        )}
-      </AnimatePresence>
     </div>
-  );
-}
-
-// ── Register modal ─────────────────────────────────────────────────────────────
-
-interface RegisterModalProps {
-  onClose: () => void;
-  onSuccess: (user: UserProfile) => void;
-}
-
-type RegisterStep = "form" | "recording" | "submitting" | "done";
-
-function RegisterModal({ onClose, onSuccess }: RegisterModalProps) {
-  const [step, setStep] = useState<RegisterStep>("form");
-  const [displayName, setDisplayName] = useState("");
-  const [preferences, setPreferences] = useState<UserPreferences>({
-    pitch_scale: 1.0,
-    speaking_rate: 1.0,
-    energy_scale: 1.0,
-    style: "",
-  });
-  const [samples, setSamples] = useState<RecordedSample[]>([]);
-  const [recordingState, setRecordingState] = useState<"idle" | "recording">("idle");
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  async function startSampleRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const recorder = new MediaRecorder(stream, { mimeType });
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const id = `rec-${Date.now()}`;
-        setSamples((prev) => [
-          ...prev,
-          { id, blob, url, name: `Recording ${prev.length + 1}` },
-        ]);
-        setRecordingState("idle");
-      };
-
-      recorder.start(100);
-      mediaRecorderRef.current = recorder;
-      setRecordingState("recording");
-    } catch {
-      setSubmitError("Microphone access denied.");
-    }
-  }
-
-  function stopSampleRecording() {
-    if (mediaRecorderRef.current && recordingState === "recording") {
-      mediaRecorderRef.current.stop();
-    }
-  }
-
-  function removeSample(id: string) {
-    setSamples((prev) => {
-      const s = prev.find((x) => x.id === id);
-      if (s) URL.revokeObjectURL(s.url);
-      return prev.filter((x) => x.id !== id);
-    });
-  }
-
-  function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    const newSamples: RecordedSample[] = files.map((f) => ({
-      id: `file-${Date.now()}-${Math.random()}`,
-      blob: f,
-      url: URL.createObjectURL(f),
-      name: f.name,
-    }));
-    setSamples((prev) => [...prev, ...newSamples]);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
-
-  async function handleSubmit() {
-    if (!displayName.trim()) return;
-    if (samples.length < 3) {
-      setSubmitError("Please provide at least 3 voice samples.");
-      return;
-    }
-    setSubmitError(null);
-    setStep("submitting");
-
-    try {
-      const user = await registerUser({
-        display_name: displayName.trim(),
-        pitch_scale: preferences.pitch_scale,
-        speaking_rate: preferences.speaking_rate,
-        energy_scale: preferences.energy_scale,
-        audio_samples: samples.map((sample) => ({
-          blob: sample.blob,
-          name: `${sample.name}.${sample.blob.type.includes("webm") ? "webm" : "wav"}`,
-        })),
-      });
-      setStep("done");
-      setTimeout(() => onSuccess(user), 900);
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Registration failed");
-      setStep("form");
-    }
-  }
-
-  const canSubmit =
-    displayName.trim().length > 0 && samples.length >= 3 && (step as string) === "form";
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.25 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-    >
-      {/* Backdrop */}
-      <motion.div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={step !== "submitting" ? onClose : undefined}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-      />
-
-      {/* Modal */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 16 }}
-        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-10 w-full max-w-lg max-h-[90dvh] overflow-y-auto glass-elevated rounded-2xl ring-1 ring-white/[0.10] shadow-glass-lg"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.07]">
-          <div>
-            <h2 className="text-base font-semibold text-white">Register Voice Profile</h2>
-            <p className="text-xs text-white/40 mt-0.5">
-              Provide 3+ voice samples for speaker recognition
-            </p>
-          </div>
-          {step !== "submitting" && (
-            <button
-              onClick={onClose}
-              className="btn-ghost text-white/40 hover:text-white"
-            >
-              <X size={16} />
-            </button>
-          )}
-        </div>
-
-        <div className="px-6 py-5 flex flex-col gap-5">
-          {step === "done" ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="flex flex-col items-center gap-3 py-8"
-            >
-              <div className="w-14 h-14 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
-                <CheckCircle2 size={24} className="text-emerald-400" />
-              </div>
-              <p className="text-white font-semibold">Profile created!</p>
-              <p className="text-xs text-white/40">Switching to your profile…</p>
-            </motion.div>
-          ) : (
-            <>
-              {/* Display name */}
-              <div>
-                <label className="block text-xs font-semibold text-white/40 uppercase tracking-[0.18em] mb-2">
-                  Display name
-                </label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g. Alice"
-                  className="input-glass text-sm"
-                  disabled={step === "submitting"}
-                />
-              </div>
-
-              {/* Voice samples */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-semibold text-white/40 uppercase tracking-[0.18em]">
-                    Voice samples{" "}
-                    <span
-                      className={cn(
-                        "font-normal normal-case tracking-normal ml-1",
-                        samples.length >= 3
-                          ? "text-emerald-400/70"
-                          : "text-white/25"
-                      )}
-                    >
-                      {samples.length}/3 min
-                    </span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="btn-ghost text-xs py-1"
-                      disabled={step === "submitting"}
-                    >
-                      <Upload size={11} /> Upload
-                    </button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="audio/*"
-                      multiple
-                      className="sr-only"
-                      onChange={handleFileUpload}
-                    />
-                    <button
-                      type="button"
-                      onClick={
-                        recordingState === "idle"
-                          ? startSampleRecording
-                          : stopSampleRecording
-                      }
-                      disabled={step === "submitting"}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all duration-200",
-                        recordingState === "recording"
-                          ? "bg-red-500/20 text-red-300 border border-red-500/30"
-                          : "bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/30"
-                      )}
-                    >
-                      {recordingState === "recording" ? (
-                        <>
-                          <MicOff size={11} /> Stop
-                        </>
-                      ) : (
-                        <>
-                          <Mic size={11} /> Record
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {samples.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-white/[0.10] px-4 py-6 text-center text-xs text-white/25">
-                    Record or upload at least 3 voice samples (2–10 sec each)
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {samples.map((s) => (
-                      <div
-                        key={s.id}
-                        className="flex items-center gap-3 rounded-xl bg-white/[0.04] border border-white/[0.07] px-3 py-2"
-                      >
-                        <audio
-                          src={s.url}
-                          controls
-                          className="flex-1 h-7 min-w-0"
-                          style={{ colorScheme: "dark" }}
-                        />
-                        <span className="text-[11px] text-white/35 truncate max-w-[80px] hidden sm:block">
-                          {s.name}
-                        </span>
-                        <button
-                          onClick={() => removeSample(s.id)}
-                          className="text-white/25 hover:text-red-400 transition-colors ml-1 shrink-0"
-                          disabled={step === "submitting"}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Error */}
-              {submitError && (
-                <div className="flex items-start gap-2 rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2.5 text-xs text-red-300">
-                  <XCircle size={13} className="shrink-0 mt-0.5" />
-                  {submitError}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="btn-secondary text-sm py-2"
-                  disabled={step === "submitting"}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={!canSubmit || step === "submitting"}
-                  className="btn-primary text-sm py-2"
-                >
-                  {step === "submitting" ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      Registering…
-                    </>
-                  ) : (
-                    <>
-                      <User size={14} />
-                      Create profile
-                    </>
-                  )}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </motion.div>
-    </motion.div>
   );
 }

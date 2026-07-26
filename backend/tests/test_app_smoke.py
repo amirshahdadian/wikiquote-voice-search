@@ -21,16 +21,6 @@ class StubQuoteSearch:
             }
         ][:limit]
 
-    def get_random_quote(self):
-        return {
-            "quote_id": "quote-random",
-            "quote_text": "Random quote",
-            "author_name": "Test Author",
-            "source_title": "Test Source",
-            "page_title": "Test Author",
-            "citation": None,
-        }
-
     async def search_by_theme(self, theme: str, limit: int = 10):
         return await self.search_quotes(theme, limit)
 
@@ -42,9 +32,6 @@ class StubQuoteSearch:
 
     async def voice_search(self, query: str, limit: int = 3):
         return await self.search_quotes(query, limit)
-
-    def get_popular_authors(self, limit: int = 20):
-        return [{"author_name": "Test Author", "quote_count": 1}]
 
     def close(self):
         return None

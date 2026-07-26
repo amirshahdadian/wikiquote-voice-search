@@ -31,7 +31,6 @@ import {
   deleteUserProfile,
   fetchUsers,
   reEnrollUser,
-  registerUser,
   resolveApiUrl,
 } from "@/lib/api";
 
@@ -109,7 +108,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
   const [isLoading, setIsLoading] = useState(false);
   const [reEnrollTarget, setReEnrollTarget] = useState<UserProfile | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserProfile | null>(null);
-  const [showAddUser, setShowAddUser] = useState(false);
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -180,13 +178,13 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
           >
             <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
           </button>
-          <button
-            onClick={() => setShowAddUser(true)}
+          <Link
+            href="/register"
             className="btn-primary py-1.5 px-3 text-xs"
           >
             <Plus size={13} />
             Add user
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -351,18 +349,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
         )}
       </AnimatePresence>
 
-      {/* ── Add user modal ── */}
-      <AnimatePresence>
-        {showAddUser && (
-          <AddUserModal
-            onClose={() => setShowAddUser(false)}
-            onSuccess={(user) => {
-              setUsers((prev) => [...prev, user]);
-              setShowAddUser(false);
-            }}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -448,54 +434,16 @@ function ReEnrollModal({
   );
 }
 
-// ── Add user modal ─────────────────────────────────────────────────────────────
-function AddUserModal({
-  onClose,
-  onSuccess,
-}: {
-  onClose: () => void;
-  onSuccess: (user: UserProfile) => void;
-}) {
-  const [displayName, setDisplayName] = useState("");
-
-  return (
-    <ModalOverlay onClose={onClose}>
-      <RecordingForm
-        title="Enroll new user"
-        subtitle="Enter a name and record 3 voice samples."
-        nameField={{ value: displayName, onChange: setDisplayName }}
-        onClose={onClose}
-        onSubmit={async (samples) => {
-          if (!displayName.trim()) throw new Error("Name is required");
-          return registerUser({
-            display_name: displayName.trim(),
-            pitch_scale: 1.0,
-            speaking_rate: 1.0,
-            energy_scale: 1.0,
-            audio_samples: samples.map((sample) => ({
-              blob: sample.blob,
-              name: `${sample.name}.${sample.blob.type.includes("webm") ? "webm" : "wav"}`,
-            })),
-          });
-        }}
-        onSuccess={onSuccess}
-      />
-    </ModalOverlay>
-  );
-}
-
 // ── Shared recording form ──────────────────────────────────────────────────────
 function RecordingForm({
   title,
   subtitle,
-  nameField,
   onClose,
   onSubmit,
   onSuccess,
 }: {
   title: string;
   subtitle: string;
-  nameField?: { value: string; onChange: (v: string) => void };
   onClose: () => void;
   onSubmit: (samples: RecordedSample[]) => Promise<UserProfile>;
   onSuccess: (user: UserProfile) => void;
@@ -576,8 +524,7 @@ function RecordingForm({
     }
   }
 
-  const canSubmit = samples.length >= 3 && !submitting &&
-    (nameField ? nameField.value.trim().length > 0 : true);
+  const canSubmit = samples.length >= 3 && !submitting;
 
   return (
     <motion.div
@@ -598,21 +545,6 @@ function RecordingForm({
           <X size={15} />
         </button>
       </div>
-
-      {/* Name field */}
-      {nameField && (
-        <div className="mb-4">
-          <label className="text-xs font-medium text-white/50 mb-1.5 block">Name</label>
-          <input
-            type="text"
-            value={nameField.value}
-            onChange={(e) => nameField.onChange(e.target.value)}
-            placeholder="e.g. Alice"
-            className="input-glass text-sm py-2.5"
-            autoFocus
-          />
-        </div>
-      )}
 
       {/* Samples list */}
       <div className="mb-4">

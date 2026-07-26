@@ -65,14 +65,6 @@ export async function fetchUsers(): Promise<UserProfile[]> {
   }
 }
 
-export async function fetchUser(userId: string): Promise<UserProfile | null> {
-  try {
-    return await requestJson<UserProfile>(`/api/users/${encodeURIComponent(userId)}`);
-  } catch {
-    return null;
-  }
-}
-
 export async function fetchHealth(): Promise<HealthStatus | null> {
   try {
     return await requestJson<HealthStatus>("/api/health");
@@ -135,14 +127,6 @@ export async function registerUser(payload: {
   return requestJson<UserProfile>("/api/users/register", {
     method: "POST",
     body: formData,
-  });
-}
-
-export async function updateUserPreferences(userId: string, preferences: UserPreferences): Promise<UserProfile> {
-  return requestJson<UserProfile>(`/api/users/${encodeURIComponent(userId)}/preferences`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(preferences),
   });
 }
 

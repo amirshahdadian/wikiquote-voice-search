@@ -1,7 +1,6 @@
 """Pydantic schemas for the FastAPI backend."""
 
 from .api import (
-    AuthorResult,
     ChatQueryRequest,
     ChatQueryResponse,
     HealthResponse,
@@ -15,7 +14,6 @@ from .api import (
 )
 
 __all__ = [
-    "AuthorResult",
     "ChatQueryRequest",
     "ChatQueryResponse",
     "HealthResponse",

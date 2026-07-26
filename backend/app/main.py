@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.routers.audio import router as audio_router
-from backend.app.api.routers.authors import router as authors_router
 from backend.app.api.routers.chat import router as chat_router
 from backend.app.api.routers.health import router as health_router
 from backend.app.api.routers.quotes import router as quotes_router
@@ -51,7 +50,6 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(quotes_router)
-    app.include_router(authors_router)
     app.include_router(users_router)
     app.include_router(chat_router)
     app.include_router(voice_router)

@@ -20,12 +20,6 @@ async def search_quotes(
     return [QuoteResult(**quote) for quote in quotes]
 
 
-@router.get("/random", response_model=QuoteResult | None)
-def get_random_quote(search_service: QuoteSearchService = Depends(get_quote_search_service)) -> QuoteResult | None:
-    quote = search_service.get_random_quote()
-    return QuoteResult(**quote) if quote else None
-
-
 @router.get("/autocomplete", response_model=list[QuoteResult])
 def autocomplete(
     query: str = Query(min_length=1, description="Partial quote fragment for live suggestions"),

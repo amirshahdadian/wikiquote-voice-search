@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     frontend_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
-    conversation_history_limit: int = 8
 
     neo4j_uri: str = "neo4j://127.0.0.1:7687"
     neo4j_username: str = "neo4j"
@@ -35,14 +34,11 @@ class Settings(BaseSettings):
     gemini_max_retries: int = 2
 
     batch_size: int = 1000
-    search_limit: int = 5
     log_level: str = "INFO"
     parse_page_limit: int | None = None
 
     data_dir: Path = Path("data")
     artifacts_dir: Path = Path("artifacts")
-    models_dir: Path = Path("models")
-    recordings_dir: Path | None = None
     db_path: Path | None = None
     quotes_file: Path | None = None
     xml_file: Path = Path("enwikiquote-20250601-pages-articles.xml")
@@ -51,7 +47,6 @@ class Settings(BaseSettings):
     quote_max_length: int = 800
     quote_min_words: int = 5
     quote_max_words: int = 120
-    quote_max_sentences: int = 6
     quote_min_alpha_ratio: float = 0.5
 
     @field_validator("frontend_origins", mode="before")
@@ -62,10 +57,6 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
-
-    @property
-    def resolved_recordings_dir(self) -> Path:
-        return (self.recordings_dir or (self.data_dir / "recordings")).expanduser()
 
     @property
     def resolved_db_path(self) -> Path:

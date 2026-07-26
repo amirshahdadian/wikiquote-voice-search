@@ -45,6 +45,9 @@ LangGraph holds conversation state and runs three nodes: `interpret`,
 `retrieve`, and `respond`. It is a bounded workflow, not an autonomous agent.
 It cannot choose tools, create new steps, or execute model output.
 
+Voice transcripts enter this same workflow unchanged. There is no separate
+list of filler words, command patterns, or hand-written voice search parser.
+
 ## Models and cost
 
 The default model IDs are:

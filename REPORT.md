@@ -135,8 +135,8 @@ length before they are written to Neo4j.
 ## 5. Retrieval
 
 The runtime exposes fixed repository methods for lexical search, vector search,
-author search, autocomplete, random selection, and popular authors. Model text
-is never interpolated into Cypher.
+author search, autocomplete, and random selection. Model text is never
+interpolated into Cypher.
 
 Topic retrieval runs full-text and vector searches, then combines their ranks
 with reciprocal rank fusion. It does not try to compare raw full-text scores
@@ -171,8 +171,10 @@ general agent would add cost and failure modes without helping this task.
 
 ## 7. Voice and users
 
-Voice input is transcribed by `mlx-whisper`. If the user did not choose a
-profile, `resemblyzer` compares the incoming speaker vector with enrolled user
+Voice input is transcribed by `mlx-whisper` and passed unchanged to the same
+Gemini intent classifier used for typed requests. There is no second
+hand-written voice command parser. If the user did not choose a profile,
+`resemblyzer` compares the incoming speaker vector with enrolled user
 embeddings. The selected or recognized user ID determines the Kokoro voice and
 speech preferences.
 
@@ -246,8 +248,10 @@ pretend that a skipped network test is a quality result.
 ## 11. Code reduction
 
 The deterministic extraction, search, and conversation group measured 4,027
-lines before the redesign. Its direct replacement is 1,653 lines, a reduction
-of about 59 percent. Most of the removed code was heuristic classification,
+lines before the redesign. Its direct replacement is 1,505 lines, a reduction
+of about 63 percent. Production Python, TypeScript, TSX, and CSS across the
+repository fell from 11,924 to 6,306 lines, a reduction of about 47 percent.
+Most of the removed code was heuristic classification,
 manual relevance scoring, duplicate endpoint logic, and compatibility code for
 the old graph.
 

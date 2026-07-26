@@ -11,10 +11,8 @@ from typing import Any
 from backend.app.core.settings import Settings
 from backend.app.integrations.audio import KOKORO_VOICES, SpeakerIdentificationService
 from backend.app.integrations.sqlite_users import (
-    create_user,
     delete_tts_preferences,
     delete_user_profile,
-    delete_user_record,
     get_tts_preferences,
     get_user_profile,
     initialize_database,
@@ -69,19 +67,11 @@ class UserService:
                 embedding,
                 str(self.settings.embeddings_dir / f"{user_id}.pkl"),
             )
-            create_user(user_id, self.settings.resolved_db_path)
             save_user_profile(user_id, display_name, group_identifier, self.settings.resolved_db_path)
             save_tts_preferences(user_id, preferences, self.settings.resolved_db_path)
             return self._compose_user_profile(user_id)
         finally:
             self._cleanup_paths(sample_paths)
-
-    def update_user_preferences(self, user_id: str, preferences: dict[str, Any]) -> dict[str, Any]:
-        profile = self.get_user(user_id)
-        if profile is None:
-            raise KeyError(f"Unknown user '{user_id}'")
-        save_tts_preferences(user_id, preferences, self.settings.resolved_db_path)
-        return self._compose_user_profile(user_id)
 
     def re_enroll_user(
         self,
@@ -114,7 +104,6 @@ class UserService:
             embedding_path.unlink()
         delete_tts_preferences(user_id, self.settings.resolved_db_path)
         delete_user_profile(user_id, self.settings.resolved_db_path)
-        delete_user_record(user_id, self.settings.resolved_db_path)
 
     def load_recognized_user(self, user_id: str, confidence: float, source: str) -> dict[str, Any]:
         profile = self.get_user(user_id) or {"user_id": user_id, "display_name": user_id}
@@ -174,4 +163,3 @@ class UserService:
         for path in paths:
             if os.path.exists(path):
                 os.unlink(path)
-

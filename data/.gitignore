@@ -1,11 +1,5 @@
 # Ignore generated data artifacts
 
-# Audio recordings (ignore all audio files)
-recordings/*.wav
-recordings/*.mp3
-recordings/*.m4a
-recordings/*.ogg
-
 # Speaker embeddings (ignore all model files)
 embeddings/*.pkl
 embeddings/*.npy
@@ -16,5 +10,4 @@ embeddings/*.npy
 *.sqlite3
 
 # Keep directory structure
-!recordings/.gitkeep
 !embeddings/.gitkeep

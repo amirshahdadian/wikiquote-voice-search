@@ -48,7 +48,7 @@ export default function RegisterForm() {
         audio_samples: samples.map((sample) => ({ blob: sample.blob, name: sample.name })),
       });
       setNotice(`Profile saved for ${payload.display_name}. Redirecting to the main app...`);
-      router.push(`/app?user=${encodeURIComponent(payload.user_id)}`);
+      router.push(`/?user=${encodeURIComponent(payload.user_id)}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration failed.");
     } finally {
@@ -68,11 +68,8 @@ export default function RegisterForm() {
               <Link className="nav-link" href="/">
                 Discover
               </Link>
-              <Link className="nav-link" href="/app">
-                Dashboard
-              </Link>
-              <Link className="nav-link" href="/profile">
-                Profile
+              <Link className="nav-link" href="/users">
+                Users
               </Link>
             </nav>
           </div>
@@ -242,7 +239,7 @@ export default function RegisterForm() {
                   Save Draft
                 </button>
                 <div className="flex flex-wrap gap-3">
-                  <Link className="secondary-button" href="/app">
+                  <Link className="secondary-button" href="/">
                     Skip to Main App
                   </Link>
                   <button className="primary-button" disabled={isSubmitting} type="submit">
