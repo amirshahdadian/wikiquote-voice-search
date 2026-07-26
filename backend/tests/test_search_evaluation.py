@@ -34,6 +34,28 @@ def _quote_id(text: str) -> str:
     return stable_id(normalized)
 
 
+async def _interpret_all(gemini, cases):
+    return [
+        (await gemini.interpret(query, [])).kind
+        for query, _ in cases
+    ]
+
+
+async def _topic_hits(search, cases):
+    hits = []
+    for query, acceptable_quotes in cases:
+        results = await search.search(
+            SearchIntent(kind="topic", search_text=query, limit=10)
+        )
+        hits.append(
+            bool(
+                {_quote_id(quote) for quote in acceptable_quotes}
+                & {hit.quote_id for hit in results}
+            )
+        )
+    return hits
+
+
 def test_evaluation_corpus_has_fixed_reviewable_groups():
     cases = _load_cases()
 
@@ -110,10 +132,7 @@ def evaluation_results():
     )
     search = HybridSearch(repository, gemini)
     try:
-        predicted = [
-            asyncio.run(gemini.interpret(query, [])).kind
-            for query, _ in cases["intents"]
-        ]
+        predicted = asyncio.run(_interpret_all(gemini, cases["intents"]))
         intent_correct = sum(
             actual == expected
             for actual, (_, expected) in zip(predicted, cases["intents"])
@@ -133,27 +152,7 @@ def evaluation_results():
             )
             for query, expected in cases["authors"]
         )
-        topic_hits = sum(
-            bool(
-                {
-                    _quote_id(quote)
-                    for quote in acceptable_quotes
-                }
-                & {
-                    hit.quote_id
-                    for hit in asyncio.run(
-                        search.search(
-                            SearchIntent(
-                                kind="topic",
-                                search_text=query,
-                                limit=10,
-                            )
-                        )
-                    )
-                }
-            )
-            for query, acceptable_quotes in cases["topics"]
-        )
+        topic_hits = sum(asyncio.run(_topic_hits(search, cases["topics"])))
         return EvaluationResults(
             intent_correct,
             fragment_hits,
@@ -204,9 +203,10 @@ def test_intent_model_price_benchmark():
                 settings.gemini_embedding_model,
                 settings.gemini_embedding_dimensions,
             )
+            predicted = asyncio.run(_interpret_all(service, cases))
             scores[model] = sum(
-                asyncio.run(service.interpret(query, [])).kind == expected
-                for query, expected in cases
+                actual == expected
+                for actual, (_, expected) in zip(predicted, cases)
             )
         assert scores["gemini-3.5-flash-lite"] / 40 >= 0.95
         if scores["gemini-3.1-flash-lite"] / 40 >= 0.95:

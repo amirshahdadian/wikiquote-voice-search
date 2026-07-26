@@ -41,8 +41,7 @@ FOREACH (_ IN CASE WHEN row.work_key IS NULL THEN [] ELSE [1] END |
 """
 
 _ATTRIBUTION_SUBQUERY = """
-CALL {
-  WITH q
+CALL (q) {
   MATCH (q)-[:HAS_ATTRIBUTION]->(attribution:Attribution)-[:FOUND_ON]->(page:WikiquotePage)
   OPTIONAL MATCH (attribution)-[:ATTRIBUTED_TO]->(author:Author)
   OPTIONAL MATCH (attribution)-[:FROM_WORK]->(work:Work)
@@ -95,8 +94,7 @@ YIELD node AS matched_author, score
 MATCH (q:Quote)-[:HAS_ATTRIBUTION]->(matched_attribution:Attribution)
       -[:ATTRIBUTED_TO]->(matched_author)
 WITH DISTINCT q, matched_author, score
-CALL {
-  WITH q, matched_author
+CALL (q, matched_author) {
   MATCH (q)-[:HAS_ATTRIBUTION]->(matched_attribution:Attribution)
         -[:ATTRIBUTED_TO]->(matched_author)
   MATCH (matched_attribution)-[:FOUND_ON]->(matched_page:WikiquotePage)
@@ -372,7 +370,7 @@ RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
         self, cypher: str, *, search_type: str, **parameters: Any
     ) -> list[QuoteHit]:
         with self.driver.session() as session:
-            records = session.run(cypher, **parameters)
+            records = session.run(cypher, parameters)
             return [
                 QuoteHit(
                     quote_id=record["quote_id"],

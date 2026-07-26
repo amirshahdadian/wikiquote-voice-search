@@ -11,8 +11,8 @@ class RecordingSession:
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
 
-    def run(self, cypher: str, **parameters):
-        self.calls.append((cypher, parameters))
+    def run(self, query: str, parameters=None, **kwargs):
+        self.calls.append((query, {**(parameters or {}), **kwargs}))
         return []
 
 
@@ -163,6 +163,9 @@ def test_runtime_search_uses_only_fixed_semantic_index_queries():
     assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, author, autocomplete))
     assert "matched_author.name AS author_name" in author
     assert "matched_attribution.citation AS citation" in author
+    assert "CALL (q)" in lexical
+    assert "CALL (q, matched_author)" in author
+    assert all("CALL {\n  WITH" not in query for query in (lexical, vector, author, autocomplete))
 
 
 def test_verification_reports_current_graph_and_stale_embeddings():
