@@ -34,6 +34,10 @@ SCHEMA_STATEMENTS = [
     FOR (a:Author) ON EACH [a.name]
     """,
     """
+    CREATE TEXT INDEX quote_search_text IF NOT EXISTS
+    FOR (q:Quote) ON (q.search_text)
+    """,
+    """
     CREATE VECTOR INDEX quote_embedding IF NOT EXISTS
     FOR (q:Quote) ON q.embedding
     OPTIONS {indexConfig: {

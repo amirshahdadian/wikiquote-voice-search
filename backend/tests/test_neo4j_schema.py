@@ -92,6 +92,7 @@ def test_schema_has_only_explainable_constraints_and_indexes():
     assert "quote_id_unique" in joined
     assert "attribution_id_unique" in joined
     assert "quote_embedding" in joined
+    assert "quote_search_text" in joined
     assert "`vector.dimensions`: 768" in joined
     assert "`vector.similarity_function`: 'cosine'" in joined
 
@@ -132,6 +133,7 @@ def test_loader_keeps_provenance_on_attribution_not_quote():
     assert "q.primary_author" not in query
     assert parameters["rows"][0]["author_key"]
     assert parameters["rows"][0]["work_key"]
+    assert parameters["rows"][0]["search_text"] == "a sufficiently long quotation"
 
 
 def test_maintenance_cli_has_explicit_graph_commands():
@@ -150,19 +152,21 @@ def test_runtime_search_uses_only_fixed_semantic_index_queries():
 
     assert repository.lexical_search("hope + courage", 5) == []
     assert repository.vector_search([0.0] * 768, 5) == []
+    assert repository.fragment_search("to be, or not to be", 5) == []
     assert repository.author_search("Virginia Woolf", 5) == []
     assert repository.autocomplete("to be", 5) == []
 
-    lexical, vector, author, autocomplete = [
+    lexical, vector, fragment, author, autocomplete = [
         query for query, _ in driver.session_instance.calls
     ]
     assert "db.index.fulltext.queryNodes('quote_text'" in lexical
     assert "VECTOR INDEX quote_embedding" in vector
     assert "SCORE AS score" in vector
     assert "db.index.vector.queryNodes" not in vector
+    assert "q.search_text CONTAINS $search_text" in fragment
     assert "db.index.fulltext.queryNodes('author_name'" in author
     assert "db.index.fulltext.queryNodes('quote_text'" in autocomplete
-    assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, author, autocomplete))
+    assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, fragment, author, autocomplete))
     assert "matched_author.name AS author_name" in author
     assert "matched_attribution.citation AS citation" in author
     assert "CALL (q)" in lexical
@@ -190,14 +194,15 @@ def test_verification_reports_current_graph_and_stale_embeddings():
 
 
 def test_readiness_requires_all_search_indexes_online():
-    ready_driver = IndexDriver(3)
-    incomplete_driver = IndexDriver(2)
+    ready_driver = IndexDriver(4)
+    incomplete_driver = IndexDriver(3)
 
     assert Neo4jQuoteRepository(driver=ready_driver).is_ready() is True
     assert Neo4jQuoteRepository(driver=incomplete_driver).is_ready() is False
     assert ready_driver.connected is True
     assert ready_driver.parameters["names"] == [
         "quote_text",
+        "quote_search_text",
         "author_name",
         "quote_embedding",
     ]

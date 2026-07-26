@@ -56,11 +56,17 @@ class HybridSearch:
         if intent.kind == "random":
             item = await asyncio.to_thread(self.repository.random_quote)
             return [item] if item else []
+        if intent.kind == "quote_fragment":
+            return await asyncio.to_thread(
+                self.repository.fragment_search,
+                intent.search_text,
+                intent.limit,
+            )
 
         lexical = await asyncio.to_thread(
             self.repository.lexical_search, intent.search_text, max(intent.limit, 20)
         )
-        if intent.kind != "topic" or not self.semantic_ready:
+        if not self.semantic_ready:
             return lexical[: intent.limit]
 
         try:

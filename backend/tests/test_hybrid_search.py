@@ -29,6 +29,10 @@ class FakeRepository:
         self.calls.append("vector")
         return [hit("vector", "vector"), hit("shared", "vector")]
 
+    def fragment_search(self, text, limit):
+        self.calls.append("fragment")
+        return [hit("fragment", "fragment")]
+
     def author_search(self, name, limit):
         self.calls.append("author")
         return [hit("author", "author")]
@@ -111,7 +115,7 @@ def test_incomplete_document_embeddings_disable_semantic_search():
     assert gemini.calls == 0
 
 
-def test_quote_fragment_stays_lexical_only():
+def test_quote_fragment_uses_punctuation_insensitive_fragment_search():
     repository = FakeRepository()
     gemini = FakeGemini()
     search = HybridSearch(repository, gemini)
@@ -122,7 +126,7 @@ def test_quote_fragment_stays_lexical_only():
         )
     )
 
-    assert repository.calls == ["lexical"]
+    assert repository.calls == ["fragment"]
     assert gemini.calls == 0
 
 

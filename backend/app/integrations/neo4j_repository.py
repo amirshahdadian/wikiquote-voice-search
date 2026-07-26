@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from collections.abc import Iterable
 from typing import Any
 
@@ -15,7 +16,8 @@ LOAD_QUERY = """
 UNWIND $rows AS row
 MERGE (q:Quote {id: row.quote_id})
 SET q.text = row.quote,
-    q.normalized_text = row.normalized_quote
+    q.normalized_text = row.normalized_quote,
+    q.search_text = row.search_text
 MERGE (a:Attribution {id: row.attribution_id})
 SET a.status = row.quote_type,
     a.citation = row.citation,
@@ -92,6 +94,21 @@ LIMIT $limit
 """
 )
 
+_FRAGMENT_QUERY = (
+    """
+MATCH (q:Quote)
+WHERE q.search_text CONTAINS $search_text
+WITH q
+ORDER BY size(q.search_text), q.search_text
+LIMIT $limit
+"""
+    + _ATTRIBUTION_SUBQUERY
+    + """
+RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
+       citation, page_title, 1.0 AS score
+"""
+)
+
 _AUTHOR_QUERY = """
 CALL db.index.fulltext.queryNodes('author_name', $query, {limit: 5})
 YIELD node AS matched_author, score
@@ -145,6 +162,11 @@ def _entity_key(value: str | None) -> str | None:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def _search_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return " ".join(re.sub(r"[^\w\s]", " ", normalized).split())
+
+
 def _lucene_query(value: str, *, prefix: bool = False) -> str:
     cleaned = re.sub(r'[+\-!(){}\[\]^"~*?:\\/]', " ", value)
     terms = cleaned.split()
@@ -187,9 +209,14 @@ class Neo4jQuoteRepository:
                     WHERE name IN $names AND state = 'ONLINE'
                     RETURN count(*) AS online
                     """,
-                    names=["quote_text", "author_name", "quote_embedding"],
+                    names=[
+                        "quote_text",
+                        "quote_search_text",
+                        "author_name",
+                        "quote_embedding",
+                    ],
                 ).single()
-            return bool(record and record["online"] == 3)
+            return bool(record and record["online"] == 4)
         except Exception:
             return False
 
@@ -250,6 +277,7 @@ class Neo4jQuoteRepository:
             "attribution_id": row["attribution_id"],
             "quote": row["quote"],
             "normalized_quote": row["normalized_quote"],
+            "search_text": _search_text(row["quote"]),
             "page_id": str(row["page_id"]),
             "revision_id": str(row["revision_id"]),
             "page_title": row["page_title"],
@@ -356,6 +384,14 @@ class Neo4jQuoteRepository:
             search_type="vector",
             embedding=vector,
             candidate_limit=max(limit, 50),
+            limit=limit,
+        )
+
+    def fragment_search(self, text: str, limit: int) -> list[QuoteHit]:
+        return self._query_hits(
+            _FRAGMENT_QUERY,
+            search_type="fragment",
+            search_text=_search_text(text),
             limit=limit,
         )
 
