@@ -3,8 +3,10 @@ from __future__ import annotations
 import pytest
 
 from backend.app.domain import QuoteHit, SearchIntent
+from backend.app.core.settings import Settings
 from backend.app.services.conversation import ConversationService
 from backend.app.services.quote_search import QuoteSearchService
+from backend.app.services.voice import VoiceService
 
 
 HIT = QuoteHit(
@@ -143,3 +145,22 @@ async def test_conversation_reports_missing_selected_user_without_failing():
 
     assert result["recognized_user"] is None
     assert result["warnings"] == ["selected_user_not_found"]
+
+
+class BrokenTTS:
+    def synthesize_personalized(self, **kwargs):
+        raise RuntimeError("model unavailable")
+
+
+def test_voice_service_reports_kokoro_unavailable_without_network_fallback(
+    tmp_path,
+):
+    service = VoiceService(
+        Settings(data_dir=tmp_path),
+        tts_service=BrokenTTS(),
+    )
+
+    assert service.synthesize_audio("A quotation") == (
+        None,
+        ["tts_unavailable"],
+    )

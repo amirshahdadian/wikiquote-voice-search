@@ -1,7 +1,10 @@
 import asyncio
 
+import pytest
+
 from backend.app.domain import QuoteHit, SearchIntent
 from backend.app.integrations.gemini import GeminiUnavailable
+from backend.app.services.quote_search import QuoteSearchService
 from backend.app.services.hybrid_search import HybridSearch, reciprocal_rank_fusion
 
 
@@ -34,6 +37,10 @@ class FakeRepository:
     def random_quote(self):
         self.calls.append("random")
         return hit("random", "random")
+
+    def autocomplete(self, text, limit):
+        self.calls.append(text)
+        return [hit("apostrophe-quote", "autocomplete")]
 
 
 class FakeGemini:
@@ -109,3 +116,13 @@ def test_author_and_random_intents_use_fixed_repository_methods():
     assert author[0].quote_id == "author"
     assert random[0].quote_id == "random"
     assert repository.calls == ["author", "random"]
+
+
+@pytest.mark.parametrize("query", ["can't stop", "cant stop", "can’t stop"])
+def test_autocomplete_accepts_apostrophe_forms(query):
+    repository = FakeRepository()
+    service = QuoteSearchService(repository, hybrid_search=None)
+
+    results = service.autocomplete(query, 5)
+
+    assert results[0]["quote_id"] == "apostrophe-quote"

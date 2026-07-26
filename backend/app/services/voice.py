@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.core.settings import Settings
-from backend.app.integrations.audio import ASRService, SimpleTTSService, SpeakerIdentificationService, TTSService
+from backend.app.integrations.audio import ASRService, SpeakerIdentificationService, TTSService
 
 
 class VoiceService:
@@ -20,13 +20,11 @@ class VoiceService:
         speaker_service: SpeakerIdentificationService | None = None,
         asr_service: ASRService | None = None,
         tts_service: TTSService | None = None,
-        tts_fallback: SimpleTTSService | None = None,
     ):
         self.settings = app_settings
         self._speaker_service = speaker_service or SpeakerIdentificationService(threshold=0.75)
         self._asr_service = asr_service
         self._tts_service = tts_service
-        self._tts_fallback = tts_fallback
         self.settings.generated_audio_dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -45,21 +43,12 @@ class VoiceService:
             self._tts_service = TTSService(device="cpu", db_path=str(self.settings.resolved_db_path))
         return self._tts_service
 
-    @property
-    def tts_fallback(self) -> SimpleTTSService:
-        if self._tts_fallback is None:
-            self._tts_fallback = SimpleTTSService(device="cpu", db_path=str(self.settings.resolved_db_path))
-        return self._tts_fallback
-
     def health_flags(self, search_ready: bool) -> dict[str, bool]:
         return {
             "search": search_ready,
             "asr": importlib.util.find_spec("mlx_whisper") is not None,
             "speaker_id": importlib.util.find_spec("resemblyzer") is not None,
-            "tts": (
-                importlib.util.find_spec("kokoro_onnx") is not None
-                or importlib.util.find_spec("gtts") is not None
-            ),
+            "tts": importlib.util.find_spec("kokoro_onnx") is not None,
             "sqlite": self.settings.resolved_db_path.exists(),
         }
 
@@ -91,7 +80,6 @@ class VoiceService:
         user_id: str | None = None,
         preferences: dict[str, Any] | None = None,
     ) -> tuple[str | None, list[str]]:
-        warnings: list[str] = []
         primary_filename = f"{uuid.uuid4().hex}.wav"
         primary_path = self.settings.generated_audio_dir / primary_filename
         try:
@@ -101,23 +89,9 @@ class VoiceService:
                 output_path=str(primary_path),
                 preferences=preferences,
             )
-            return self.audio_url_for(primary_filename), warnings
+            return self.audio_url_for(primary_filename), []
         except Exception:
-            warnings.append("tts_fallback")
-
-        fallback_filename = f"{uuid.uuid4().hex}.mp3"
-        fallback_path = self.settings.generated_audio_dir / fallback_filename
-        try:
-            self.tts_fallback.synthesize_personalized(
-                text=text,
-                user_id=user_id,
-                output_path=str(fallback_path),
-                preferences=preferences,
-            )
-            return self.audio_url_for(fallback_filename), warnings
-        except Exception:
-            warnings.append("tts_unavailable")
-            return None, warnings
+            return None, ["tts_unavailable"]
 
     def resolve_audio_path(self, audio_id: str) -> Path | None:
         candidate = (self.settings.generated_audio_dir / audio_id).resolve()
@@ -147,4 +121,3 @@ class VoiceService:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             temp_file.write(payload)
             return temp_file.name
-
