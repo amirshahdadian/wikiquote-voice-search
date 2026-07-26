@@ -12,6 +12,12 @@ from backend.app.integrations.sqlite_users import (
 )
 
 
+def test_speaker_identification_dependency_imports():
+    import resemblyzer
+
+    assert resemblyzer is not None
+
+
 def test_user_database_has_only_profiles_and_voice_preferences(tmp_path):
     database = tmp_path / "users.db"
 

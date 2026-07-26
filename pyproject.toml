@@ -20,6 +20,7 @@ dependencies = [
   "pydantic-settings>=2.6.0",
   "python-multipart>=0.0.9",
   "resemblyzer>=0.1.1.dev0",
+  "setuptools>=68,<81",
   "soundfile>=0.12.0",
   "uvicorn[standard]>=0.23.0",
 ]
