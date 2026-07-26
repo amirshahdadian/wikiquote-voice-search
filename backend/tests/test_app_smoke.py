@@ -90,3 +90,35 @@ def test_chat_endpoint():
         response = client.post("/api/chat/query", json={"message": "find a quote about courage"})
     assert response.status_code == 200
     assert response.json()["intent_type"] == "topic_search"
+
+
+def test_chat_endpoint_accepts_public_quote_field_names():
+    container = StubContainer()
+
+    async def process_chat_query(**_kwargs):
+        return {
+            "conversation_id": "stub-conversation",
+            "recognized_user": None,
+            "intent_type": "topic",
+            "response_text": "A quotation",
+            "best_quote": {
+                "quote_id": "quote-1",
+                "quote_text": "A sufficiently long quotation.",
+                "author_name": "Test Author",
+                "source_title": "Test Source",
+                "citation": None,
+                "page_title": "Test Author",
+                "relevance_score": 0.9,
+                "search_type": "hybrid",
+            },
+            "related_quotes": [],
+            "audio_url": None,
+            "warnings": [],
+        }
+
+    container.conversation.process_chat_query = process_chat_query
+    with TestClient(create_app(container=container)) as client:
+        response = client.post("/api/chat/query", json={"message": "courage"})
+
+    assert response.status_code == 200
+    assert response.json()["best_quote"]["relevance_score"] == 0.9
