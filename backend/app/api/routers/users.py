@@ -1,7 +1,7 @@
 """User profile and speaker enrollment endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
 from backend.app.api.dependencies import get_user_service
 from backend.app.api.schemas import UserPreferences, UserProfile
@@ -82,9 +82,10 @@ async def re_enroll_user(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.delete("/{user_id}", status_code=204)
-def delete_user(user_id: str, user_service: UserService = Depends(get_user_service)) -> None:
+@router.delete("/{user_id}", status_code=204, response_class=Response)
+def delete_user(user_id: str, user_service: UserService = Depends(get_user_service)) -> Response:
     try:
         user_service.delete_user(user_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=204)
