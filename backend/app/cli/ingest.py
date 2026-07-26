@@ -51,6 +51,10 @@ class ExtractedQuote:
     normalized_quote: Optional[str] = None
     quote_fingerprint: Optional[str] = None
     occurrence_key: Optional[str] = None
+    page_id: Optional[int] = None
+    revision_id: Optional[int] = None
+    quote_id: Optional[str] = None
+    attribution_id: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, excluding None values for cleaner output."""
@@ -70,6 +74,13 @@ class PageMetadata:
     default_source: Optional[str]
     inferred_author: Optional[str] = None
     inferred_work: Optional[str] = None
+
+
+def stable_id(*parts: object) -> str:
+    value = "\x1f".join(
+        "" if part is None else str(part).strip().casefold() for part in parts
+    )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 class MWParserQuoteExtractor:
@@ -566,7 +577,15 @@ class MWParserQuoteExtractor:
                 "page_title": quote.page_title,
             }
         )
-        quote.occurrence_key = self._build_occurrence_key(quote)
+        quote.quote_id = stable_id(quote.normalized_quote)
+        quote.attribution_id = stable_id(
+            quote.quote_id,
+            quote.page_id if quote.page_id is not None else quote.page_title,
+            quote.author,
+            quote.work or quote.source,
+            quote.quote_type,
+        )
+        quote.occurrence_key = quote.attribution_id
         return quote
 
     def _should_keep_finalized_quote(self, quote: ExtractedQuote) -> bool:
@@ -698,18 +717,30 @@ class MWParserQuoteExtractor:
             
             current_page = {}
             in_page = False
+            in_revision = False
             
             for event, elem in context:
+                local_tag = elem.tag.rsplit('}', 1)[-1]
                 if event == 'start':
-                    if elem.tag == f'{namespace}page' or elem.tag.endswith('}page') or elem.tag == 'page':
+                    if local_tag == 'page':
                         in_page = True
                         current_page = {}
+                    elif local_tag == 'revision' and in_page:
+                        in_revision = True
                 elif event == 'end':
-                    if (elem.tag == f'{namespace}title' or elem.tag.endswith('}title') or elem.tag == 'title') and in_page:
+                    if local_tag == 'title' and in_page:
                         current_page['title'] = elem.text or ""
-                    elif (elem.tag == f'{namespace}text' or elem.tag.endswith('}text') or elem.tag == 'text') and in_page:
+                    elif local_tag == 'id' and in_page:
+                        value = int(elem.text) if elem.text and elem.text.isdigit() else None
+                        if in_revision and 'revision_id' not in current_page:
+                            current_page['revision_id'] = value
+                        elif not in_revision and 'page_id' not in current_page:
+                            current_page['page_id'] = value
+                    elif local_tag == 'text' and in_page:
                         current_page['content'] = elem.text or ""
-                    elif (elem.tag == f'{namespace}page' or elem.tag.endswith('}page') or elem.tag == 'page') and in_page:
+                    elif local_tag == 'revision' and in_page:
+                        in_revision = False
+                    elif local_tag == 'page' and in_page:
                         # Process the completed page
                         title = current_page.get('title', '')
                         content = current_page.get('content', '')
@@ -721,6 +752,8 @@ class MWParserQuoteExtractor:
                             # Add quotes with deduplication
                             for quote in page_quotes:
                                 self.duplicate_stats['total_found'] += 1
+                                quote.page_id = current_page.get('page_id')
+                                quote.revision_id = current_page.get('revision_id')
                                 finalized_quote = self._finalize_quote(quote)
                                 quote_dict = finalized_quote.to_neo4j_dict()
                                 

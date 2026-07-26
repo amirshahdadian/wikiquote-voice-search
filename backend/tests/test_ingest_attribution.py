@@ -1,6 +1,64 @@
 from __future__ import annotations
 
-from backend.app.cli.ingest import MWParserQuoteExtractor
+from backend.app.cli.ingest import ExtractedQuote, MWParserQuoteExtractor
+
+
+def test_quote_id_is_stable_across_pages():
+    extractor = MWParserQuoteExtractor()
+    first = extractor._finalize_quote(
+        ExtractedQuote(
+            quote="Stay hungry, stay foolish.",
+            author="Steve Jobs",
+            page_title="Steve Jobs",
+            page_type="person",
+            page_id=10,
+            revision_id=20,
+        )
+    )
+    second = extractor._finalize_quote(
+        ExtractedQuote(
+            quote="Stay hungry, stay foolish.",
+            author="Steve Jobs",
+            page_title="Stanford commencement address",
+            page_type="theme",
+            page_id=11,
+            revision_id=21,
+        )
+    )
+
+    assert first.quote_id == second.quote_id
+    assert first.attribution_id != second.attribution_id
+    assert len(first.quote_id) == 64
+
+
+def test_page_and_revision_ids_are_preserved(tmp_path, monkeypatch):
+    xml_path = tmp_path / "wikiquote.xml"
+    xml_path.write_text(
+        """<mediawiki>
+        <page><title>Test Person</title><id>42</id>
+        <revision><id>84</id><text>A quote page.</text></revision></page>
+        </mediawiki>""",
+        encoding="utf-8",
+    )
+    extractor = MWParserQuoteExtractor()
+    monkeypatch.setattr(extractor, "_should_process_page", lambda title, content: True)
+    monkeypatch.setattr(
+        extractor,
+        "_extract_quotes_from_page",
+        lambda content, title: [
+            ExtractedQuote(
+                quote="A sufficiently long quotation for validation.",
+                author="Test Person",
+                page_title=title,
+                page_type="person",
+            )
+        ],
+    )
+
+    rows = extractor.parse_wikiquote_xml(str(xml_path))
+
+    assert rows[0]["page_id"] == 42
+    assert rows[0]["revision_id"] == 84
 
 
 def test_parse_attribution_recovers_theme_page_author_and_work():
