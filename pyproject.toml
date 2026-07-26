@@ -48,6 +48,9 @@ packages = [
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests", "frontend/tests"]
+markers = [
+  "integration: requires live Gemini and Neo4j services",
+]
 
 [project.scripts]
 which-quote-ingest = "backend.app.cli.ingest:main"

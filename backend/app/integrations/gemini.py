@@ -4,11 +4,13 @@ import logging
 import json
 import os
 import tempfile
+from time import perf_counter
 from typing import Any
 
 from google.genai import types
 
 from backend.app.domain import SearchIntent
+from backend.app.core.logging import log_model_event
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +50,16 @@ class GeminiService:
     async def interpret(
         self, message: str, context: list[dict[str, str]]
     ) -> SearchIntent:
+        started = perf_counter()
         fallback = SearchIntent(kind="topic", search_text=message.strip(), limit=5)
         if self.client is None:
+            log_model_event(
+                event="query",
+                model=self.llm_model,
+                intent=fallback.kind,
+                latency_ms=self._elapsed_ms(started),
+                fallback="missing_api_key",
+            )
             return fallback
 
         recent_context = context[-4:]
@@ -68,16 +78,50 @@ class GeminiService:
                 ),
             )
             if response.parsed is None:
+                log_model_event(
+                    event="query",
+                    model=self.llm_model,
+                    intent=fallback.kind,
+                    latency_ms=self._elapsed_ms(started),
+                    fallback="invalid_response",
+                )
                 return fallback
             if isinstance(response.parsed, SearchIntent):
-                return response.parsed
-            return SearchIntent.model_validate(response.parsed)
+                intent = response.parsed
+            else:
+                intent = SearchIntent.model_validate(response.parsed)
+            usage = getattr(response, "usage_metadata", None)
+            log_model_event(
+                event="query",
+                model=self.llm_model,
+                intent=intent.kind,
+                latency_ms=self._elapsed_ms(started),
+                input_tokens=getattr(usage, "prompt_token_count", None),
+                output_tokens=getattr(usage, "candidates_token_count", None),
+                fallback="none",
+            )
+            return intent
         except Exception as exc:
             logger.warning("Gemini intent extraction failed: %s", type(exc).__name__)
+            log_model_event(
+                event="query",
+                model=self.llm_model,
+                intent=fallback.kind,
+                latency_ms=self._elapsed_ms(started),
+                fallback=type(exc).__name__,
+            )
             return fallback
 
     async def embed_query(self, text: str) -> list[float]:
+        started = perf_counter()
         if self.client is None:
+            log_model_event(
+                event="embedding",
+                model=self.embedding_model,
+                dimensions=self.embedding_dimensions,
+                latency_ms=self._elapsed_ms(started),
+                fallback="missing_api_key",
+            )
             raise GeminiUnavailable("Gemini API key is not configured")
         try:
             response = await self.client.aio.models.embed_content(
@@ -89,12 +133,37 @@ class GeminiService:
             )
             values = list(response.embeddings[0].values)
         except Exception as exc:
+            log_model_event(
+                event="embedding",
+                model=self.embedding_model,
+                dimensions=self.embedding_dimensions,
+                latency_ms=self._elapsed_ms(started),
+                fallback=type(exc).__name__,
+            )
             raise GeminiUnavailable("Gemini query embedding failed") from exc
         if len(values) != self.embedding_dimensions:
+            log_model_event(
+                event="embedding",
+                model=self.embedding_model,
+                dimensions=self.embedding_dimensions,
+                latency_ms=self._elapsed_ms(started),
+                fallback="invalid_dimensions",
+            )
             raise GeminiUnavailable(
                 f"Expected {self.embedding_dimensions} embedding values, got {len(values)}"
             )
+        log_model_event(
+            event="embedding",
+            model=self.embedding_model,
+            dimensions=self.embedding_dimensions,
+            latency_ms=self._elapsed_ms(started),
+            fallback="none",
+        )
         return values
+
+    @staticmethod
+    def _elapsed_ms(started: float) -> int:
+        return round((perf_counter() - started) * 1000)
 
     def create_embedding_batch(self, records: list[dict[str, str]]) -> str:
         if self.client is None:
