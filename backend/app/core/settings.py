@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     gemini_llm_model: str = "gemini-3.5-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-2"
     gemini_embedding_dimensions: int = Field(default=768, ge=768, le=768)
-    gemini_timeout_seconds: float = 8.0
+    gemini_timeout_seconds: float = Field(default=15.0, ge=10.0)
     gemini_max_retries: int = 2
 
     batch_size: int = 1000
