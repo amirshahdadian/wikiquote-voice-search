@@ -185,24 +185,6 @@ npm run typecheck
 npm run build
 ```
 
-The live quality gate requires a populated Neo4j database and explicit opt-in:
-
-```bash
-RUN_LIVE_EVALUATION=1 pytest -m integration \
-  backend/tests/test_search_evaluation.py -q
-```
-
-The two-model intent benchmark is separate because it makes 80 paid model
-requests:
-
-```bash
-RUN_MODEL_BENCHMARK=1 pytest -m integration \
-  backend/tests/test_search_evaluation.py::test_intent_model_price_benchmark -q
-```
-
-Keep `gemini-3.5-flash-lite` unless the cheaper candidate reaches at least 95
-percent intent accuracy without losing author and quote-fragment distinctions.
-
 ## Database cutover
 
 Build and verify the new graph at a separate URI. Point the application to it
