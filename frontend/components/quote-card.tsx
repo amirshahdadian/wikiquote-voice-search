@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "motion/react";
 import { Play, Quote, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { QuoteResult } from "@/lib/types";
@@ -28,9 +27,20 @@ export default function QuoteCard({
   const resolvedAudioUrl = resolveApiUrl(audioUrl);
 
   useEffect(() => {
+    if (!resolvedAudioUrl) return;
+    const audio = new Audio(resolvedAudioUrl);
+    audioRef.current = audio;
+    audio.onended = () => {
+      audio.currentTime = 0;
+      setPlaying(false);
+    };
+    audio.onerror = () => setPlaying(false);
+    audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+
     return () => {
-      audioRef.current?.pause();
-      audioRef.current = null;
+      audio.pause();
+      audio.currentTime = 0;
+      if (audioRef.current === audio) audioRef.current = null;
     };
   }, [resolvedAudioUrl]);
 
@@ -61,21 +71,14 @@ export default function QuoteCard({
 
   if (variant === "primary") {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -8 }}
-        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        whileHover={{ scale: 1.005, transition: { duration: 0.2 } }}
+      <div
         className={cn(
-          "relative overflow-hidden rounded-2xl glass ring-1 ring-white/5 p-6 md:p-8",
+          "relative overflow-hidden rounded-2xl glass ring-1 ring-white/5 p-6 md:p-8 animate-[fade-up_0.4s_ease-out] transition-transform hover:scale-[1.005]",
           className
         )}
       >
-        {/* Violet accent bar */}
         <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl accent-bar-violet" />
 
-        {/* Top row */}
         <div className="flex items-start justify-between gap-4 mb-5">
           <div className="flex items-center gap-2">
             <Quote
@@ -92,11 +95,10 @@ export default function QuoteCard({
           </div>
 
           {resolvedAudioUrl && (
-            <motion.button
-              whileTap={{ scale: 0.9 }}
+            <button
               onClick={toggleAudio}
               className={cn(
-                "flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all duration-300",
+                "flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all duration-300 active:scale-90",
                 playing
                   ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                   : "bg-white/[0.07] text-white/60 hover:text-white hover:bg-white/[0.12] border border-white/[0.08]"
@@ -105,16 +107,14 @@ export default function QuoteCard({
             >
               {playing ? <Square size={12} /> : <Play size={12} />}
               {playing ? "Stop" : "Play"}
-            </motion.button>
+            </button>
           )}
         </div>
 
-        {/* Quote text */}
         <blockquote className="font-quote text-xl md:text-2xl leading-relaxed text-white/90 mb-5">
           &ldquo;{quote.quote_text}&rdquo;
         </blockquote>
 
-        {/* Attribution */}
         <footer className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           {quote.author_name && (
             <span className="text-sm font-semibold text-violet-300">
@@ -134,28 +134,17 @@ export default function QuoteCard({
           Wikiquote: {quote.page_title}
           {quote.citation ? ` · ${quote.citation}` : ""}
         </p>
-      </motion.div>
+      </div>
     );
   }
 
-  // Secondary (compact) variant
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      whileHover={{
-        scale: 1.01,
-        backgroundColor: "rgba(255,255,255,0.09)",
-        transition: { duration: 0.2 },
-      }}
+    <div
       className={cn(
-        "group relative overflow-hidden rounded-xl glass ring-1 ring-white/5 p-4 cursor-default",
+        "group relative overflow-hidden rounded-xl glass ring-1 ring-white/5 p-4 cursor-default animate-[fade-up_0.35s_ease-out] transition-all hover:scale-[1.01] hover:bg-white/[0.09]",
         className
       )}
     >
-      {/* Amber accent dot */}
       <span className="absolute left-0 top-0 bottom-0 w-0.5 rounded-l-xl accent-bar-amber opacity-70" />
 
       <p className="font-quote text-sm leading-relaxed text-white/75 line-clamp-3 mb-2.5">
@@ -178,6 +167,6 @@ export default function QuoteCard({
         Wikiquote: {quote.page_title}
         {quote.citation ? ` · ${quote.citation}` : ""}
       </p>
-    </motion.div>
+    </div>
   );
 }

@@ -7,11 +7,9 @@ export type QuoteResult = {
   citation?: string | null;
   relevance_score?: number | null;
   search_type?: string | null;
-  match_position?: string | null;
 };
 
 export type UserPreferences = {
-  pitch_scale: number;
   speaking_rate: number;
   energy_scale: number;
   style?: string;
@@ -53,7 +51,6 @@ export type ChatQueryResponse = {
 
 export type VoiceQueryResponse = ChatQueryResponse & {
   transcript: string;
-  normalized_transcript: string;
 };
 
 export type TTSPreviewResponse = {

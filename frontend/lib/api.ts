@@ -10,10 +10,6 @@ import {
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
-export function getApiBaseUrl(): string {
-  return API_BASE_URL;
-}
-
 export function resolveApiUrl(path?: string | null): string | null {
   if (!path) {
     return null;
@@ -108,7 +104,6 @@ export async function sendVoiceQuery(payload: {
 export async function registerUser(payload: {
   display_name: string;
   group_identifier?: string | null;
-  pitch_scale?: number;
   speaking_rate?: number;
   energy_scale?: number;
   audio_samples: Array<{ blob: Blob; name: string }>;
@@ -118,7 +113,6 @@ export async function registerUser(payload: {
   if (payload.group_identifier) {
     formData.append("group_identifier", payload.group_identifier);
   }
-  formData.append("pitch_scale", String(payload.pitch_scale ?? 1));
   formData.append("speaking_rate", String(payload.speaking_rate ?? 1));
   formData.append("energy_scale", String(payload.energy_scale ?? 1));
   for (const sample of payload.audio_samples) {
@@ -163,13 +157,6 @@ export async function deleteUserProfile(userId: string): Promise<void> {
   if (!response.ok) {
     return parseApiError(response);
   }
-}
-
-export async function searchQuotes(query: string, limit = 5): Promise<QuoteResult[]> {
-  if (!query.trim()) return [];
-  return requestJson<QuoteResult[]>(
-    `/api/quotes/search?query=${encodeURIComponent(query)}&limit=${limit}`
-  );
 }
 
 export async function autocompleteQuotes(

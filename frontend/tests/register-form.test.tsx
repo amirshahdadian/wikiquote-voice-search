@@ -31,4 +31,12 @@ describe("RegisterForm", () => {
     expect(await screen.findByText(/At least 3 audio samples are required/i)).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
   });
+
+  it("only shows TTS controls that affect synthesis", () => {
+    render(<RegisterForm />);
+
+    expect(screen.queryByLabelText(/Pitch scale/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Save Draft/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Naturalist")).not.toBeInTheDocument();
+  });
 });

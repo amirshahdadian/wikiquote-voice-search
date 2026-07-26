@@ -13,7 +13,6 @@ export default function RegisterForm() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [groupIdentifier, setGroupIdentifier] = useState("");
-  const [pitchScale, setPitchScale] = useState(1);
   const [speakingRate, setSpeakingRate] = useState(1);
   const [energyScale, setEnergyScale] = useState(1);
   const [samples, setSamples] = useState<LocalAudioSample[]>([]);
@@ -42,7 +41,6 @@ export default function RegisterForm() {
       const payload: UserProfile = await registerUser({
         display_name: displayName.trim(),
         group_identifier: groupIdentifier.trim() || undefined,
-        pitch_scale: pitchScale,
         speaking_rate: speakingRate,
         energy_scale: energyScale,
         audio_samples: samples.map((sample) => ({ blob: sample.blob, name: sample.name })),
@@ -165,39 +163,9 @@ export default function RegisterForm() {
 
               <div className="mt-8">
                 <h3 className="text-lg font-bold text-ink">TTS Preferences</h3>
-                <div className="mt-5 grid gap-4 sm:grid-cols-3">
-                  <div className="rounded-xl border-2 border-scholarly-primary bg-[rgba(196,231,255,0.18)] p-4">
-                    <p className="font-headline text-sm font-bold">Naturalist</p>
-                    <p className="mt-1 text-xs text-scholarly-muted">Soft, balanced</p>
-                  </div>
-                  <div className="rounded-xl bg-scholarly-low p-4">
-                    <p className="font-headline text-sm font-bold">Authority</p>
-                    <p className="mt-1 text-xs text-scholarly-muted">Deep, resonant</p>
-                  </div>
-                  <div className="rounded-xl bg-scholarly-low p-4">
-                    <p className="font-headline text-sm font-bold">Clarity</p>
-                    <p className="mt-1 text-xs text-scholarly-muted">Crisp, analytical</p>
-                  </div>
-                </div>
               </div>
 
-              <div className="mt-8 grid gap-6 md:grid-cols-3">
-                <div>
-                  <label className="label" htmlFor="pitch-scale">
-                    Pitch scale: {pitchScale.toFixed(1)}
-                  </label>
-                  <input
-                    className="w-full accent-scholarly-primary"
-                    id="pitch-scale"
-                    max={2}
-                    min={0.5}
-                    onChange={(event) => setPitchScale(Number(event.target.value))}
-                    step={0.1}
-                    type="range"
-                    value={pitchScale}
-                  />
-                </div>
-
+              <div className="mt-5 grid gap-6 md:grid-cols-2">
                 <div>
                   <label className="label" htmlFor="speaking-rate">
                     Speaking rate: {speakingRate.toFixed(1)}
@@ -234,10 +202,7 @@ export default function RegisterForm() {
               {notice ? <p className="notice-success mt-6">{notice}</p> : null}
               {error ? <p className="notice-danger mt-6">{error}</p> : null}
 
-              <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-scholarly-line/20 pt-6">
-                <button className="text-sm font-bold text-scholarly-primary hover:underline" type="button">
-                  Save Draft
-                </button>
+              <div className="mt-8 flex flex-wrap items-center justify-end gap-3 border-t border-scholarly-line/20 pt-6">
                 <div className="flex flex-wrap gap-3">
                   <Link className="secondary-button" href="/">
                     Skip to Main App

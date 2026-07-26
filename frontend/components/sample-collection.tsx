@@ -13,10 +13,6 @@ type SampleCollectionProps = {
   onPermissionDenied?: (message: string) => void;
 };
 
-function nextSampleId() {
-  return globalThis.crypto?.randomUUID?.() ?? `sample-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 export default function SampleCollection({
   samples,
   minimum = 3,
@@ -44,7 +40,7 @@ export default function SampleCollection({
 
     const uploadedSamples = files.map(
       (file): LocalAudioSample => ({
-        id: nextSampleId(),
+        id: crypto.randomUUID(),
         name: file.name,
         blob: file,
         url: URL.createObjectURL(file),

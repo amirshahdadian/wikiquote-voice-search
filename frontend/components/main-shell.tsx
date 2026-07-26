@@ -1,6 +1,5 @@
 "use client";
 
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import {
   AlertTriangle,
   BookOpen,
@@ -11,7 +10,6 @@ import {
   Mic,
   Plus,
   Quote,
-  Square,
   User,
   Users,
   Volume2,
@@ -35,17 +33,16 @@ import type {
 import {
   autocompleteQuotes,
   fetchHealth,
-  resolveApiUrl,
   sendChatQuery,
   sendVoiceQuery as requestVoiceQuery,
 } from "@/lib/api";
+import { useAudioRecorder } from "@/lib/use-audio-recorder";
 import QuoteCard from "@/components/quote-card";
 import VoiceWaveform from "@/components/voice-waveform";
 
 const cn = (...classes: (string | false | null | undefined)[]) =>
   classes.filter(Boolean).join(" ");
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 type VoiceState = "idle" | "listening" | "processing";
 
@@ -61,7 +58,6 @@ interface ChatMessage {
   error?: string;
 }
 
-// ── Avatar color pool ──────────────────────────────────────────────────────────
 
 const AVATAR_COLORS = [
   "bg-violet-600/70",
@@ -91,7 +87,6 @@ function userInitials(name?: string): string {
     .toUpperCase();
 }
 
-// ── Health dots ────────────────────────────────────────────────────────────────
 
 function HealthDots({ health }: { health: HealthStatus | null }) {
   if (!health) return null;
@@ -116,7 +111,6 @@ function HealthDots({ health }: { health: HealthStatus | null }) {
   );
 }
 
-// ── Message bubble ────────────────────────────────────────────────────────────
 
 const NEXT_SUGGESTIONS = [
   "To be, or not to be,",
@@ -134,8 +128,6 @@ interface MessageBubbleProps {
 }
 
 function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
-  const [audioPlaying, setAudioPlaying] = useState(false);
-  const responseAudioRef = useRef<HTMLAudioElement | null>(null);
   const hasQuery = msg.query || msg.isVoice;
   const userColor = avatarColor(msg.userId);
   const initials = userInitials(msg.userName);
@@ -144,66 +136,10 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
     msg.response?.warnings?.filter((warning) => warning !== "multiple_close_matches") ?? [];
   const noQuoteFound = msg.response?.warnings?.includes("no_quote_found") ?? false;
 
-  useEffect(() => {
-    const url = resolveApiUrl(msg.response?.audio_url);
-    responseAudioRef.current?.pause();
-    responseAudioRef.current = null;
-    setAudioPlaying(false);
-
-    if (!url) return;
-
-    const audio = new Audio(url);
-    responseAudioRef.current = audio;
-    audio.onended = () => {
-      audio.currentTime = 0;
-      setAudioPlaying(false);
-    };
-    audio.onerror = () => setAudioPlaying(false);
-    audio.play().then(() => setAudioPlaying(true)).catch(() => setAudioPlaying(false));
-
-    return () => {
-      audio.pause();
-      audio.currentTime = 0;
-      if (responseAudioRef.current === audio) {
-        responseAudioRef.current = null;
-      }
-    };
-  }, [msg.response?.audio_url]);
-
-  function stopResponseAudio() {
-    if (!responseAudioRef.current) return;
-    responseAudioRef.current.pause();
-    responseAudioRef.current.currentTime = 0;
-    setAudioPlaying(false);
-  }
-
-  function toggleResponseAudio(audioUrl: string) {
-    const url = resolveApiUrl(audioUrl);
-    if (!url) return;
-    if (!responseAudioRef.current) {
-      responseAudioRef.current = new Audio(url);
-      responseAudioRef.current.onended = () => {
-        if (responseAudioRef.current) responseAudioRef.current.currentTime = 0;
-        setAudioPlaying(false);
-      };
-      responseAudioRef.current.onerror = () => setAudioPlaying(false);
-    }
-    if (audioPlaying) {
-      stopResponseAudio();
-      return;
-    }
-    responseAudioRef.current.play().catch(() => setAudioPlaying(false));
-    setAudioPlaying(true);
-  }
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-      className="flex flex-col gap-2"
+    <div
+      className="flex flex-col gap-2 animate-[fade-up_0.3s_ease-out]"
     >
-      {/* User query bubble */}
       {hasQuery && (
         <div className="flex items-end justify-end gap-2.5">
           <div className="flex flex-col items-end gap-1 max-w-[80%]">
@@ -233,14 +169,12 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
         </div>
       )}
 
-      {/* System response bubble */}
       <div className="flex items-start gap-2.5">
         <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center bg-white/[0.06] border border-white/[0.08] mt-0.5">
           <Quote size={11} className="text-violet-400" />
         </div>
 
         <div className="flex-1 flex flex-col gap-2 min-w-0">
-          {/* Loading */}
           {msg.isLoading && (
             <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm bg-white/[0.04] border border-white/[0.07] px-4 py-3 w-fit">
               <Loader2 size={13} className="text-violet-400/70 animate-spin" />
@@ -248,7 +182,6 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
             </div>
           )}
 
-          {/* Error */}
           {msg.error && (
             <div className="flex items-start gap-2 rounded-2xl rounded-tl-sm bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-300 max-w-md">
               <XCircle size={13} className="shrink-0 mt-0.5 text-red-400" />
@@ -256,10 +189,8 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
             </div>
           )}
 
-          {/* Response */}
           {!msg.isLoading && msg.response && (
             <div className="flex flex-col gap-2">
-              {/* Warnings */}
               {visibleWarnings.length > 0 && (
                 <div className="flex items-start gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-200/80">
                   <AlertTriangle size={12} className="shrink-0 mt-0.5 text-amber-400" />
@@ -269,7 +200,6 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
                 </div>
               )}
 
-              {/* Speaker recognized */}
               {msg.response.recognized_user && (
                 <span className="inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-300/80 font-medium">
                   <CheckCircle2 size={9} />
@@ -277,7 +207,6 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
                 </span>
               )}
 
-              {/* Primary quote */}
               {!noQuoteFound && msg.response.best_quote ? (
                 <QuoteCard quote={msg.response.best_quote} variant="primary" audioUrl={msg.response.audio_url} />
               ) : (
@@ -286,7 +215,6 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
                 </div>
               )}
 
-              {/* Related quotes */}
               {!noQuoteFound && msg.response.related_quotes?.length > 0 && (
                 <div className="flex flex-col gap-1.5 mt-0.5">
                   <span className="text-[10px] text-white/25 font-semibold uppercase tracking-[0.2em] px-0.5">
@@ -298,18 +226,7 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
                 </div>
               )}
 
-              {/* Replay + next suggestions */}
               <div className="flex flex-col gap-3 mt-1">
-                {msg.response.audio_url && (
-                  <button
-                    onClick={() => toggleResponseAudio(msg.response!.audio_url!)}
-                    className="self-start flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-white/40 hover:text-white/70 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] transition-all duration-200"
-                    aria-label={audioPlaying ? "Stop response audio" : "Play response audio"}
-                  >
-                    {audioPlaying ? <Square size={10} /> : <Volume2 size={10} />}
-                    {audioPlaying ? "Stop" : "Play audio"}
-                  </button>
-                )}
                 <div className="flex flex-col gap-2">
                   <span className="text-[10px] text-white/20 font-semibold uppercase tracking-[0.18em]">
                     Try next
@@ -335,11 +252,10 @@ function MessageBubble({ msg, setQuery, inputRef }: MessageBubbleProps) {
           )}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
-// ── Input form ────────────────────────────────────────────────────────────────
 // Module-level component so its identity is stable across parent re-renders.
 // If defined inside MainShell, React sees a new type on every render and
 // unmounts/remounts the input, losing focus on every keystroke.
@@ -372,7 +288,6 @@ function InputForm({
 
   return (
     <form onSubmit={onSubmit} className="flex items-center gap-3">
-      {/* Voice button */}
       <div className="relative flex items-center justify-center shrink-0">
         {voiceState === "listening" && (
           <>
@@ -380,13 +295,12 @@ function InputForm({
             <span className="absolute inset-0 rounded-full bg-red-500/15 animate-[pulse-ring_1.8s_ease-out_0.6s_infinite]" />
           </>
         )}
-        <motion.button
+        <button
           type="button"
-          whileTap={{ scale: 0.9 }}
           onClick={onVoiceClick}
           disabled={voiceState === "processing" || isLoading}
           className={cn(
-            "relative z-10 flex items-center justify-center rounded-full transition-all duration-300 shrink-0 ring-1",
+            "relative z-10 flex items-center justify-center rounded-full transition-all duration-300 shrink-0 ring-1 active:scale-90",
             micSize,
             voiceState === "idle" &&
               "bg-white/[0.07] hover:bg-violet-600/25 ring-white/[0.10] hover:ring-violet-500/30",
@@ -406,10 +320,9 @@ function InputForm({
           {voiceState === "processing" && (
             <Loader2 size={iconSize - 2} className="text-white/50 animate-spin" />
           )}
-        </motion.button>
+        </button>
       </div>
 
-      {/* Text input */}
       <div className="relative flex-1">
         <input
           ref={inputRef}
@@ -474,14 +387,12 @@ function InputForm({
   );
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
 
 interface MainShellProps {
   initialUsers: UserProfile[];
 }
 
 export default function MainShell({ initialUsers }: MainShellProps) {
-  // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [query, setQuery] = useState("");
   const [conversationId, setConversationId] = useState<string | undefined>();
@@ -489,22 +400,38 @@ export default function MainShell({ initialUsers }: MainShellProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<QuoteResult[]>([]);
 
-  // Voice state
-  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const [voiceProcessing, setVoiceProcessing] = useState(false);
 
-  // Users / health
   const users = initialUsers;
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
-  // Refs
   const inputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
+  const recorder = useAudioRecorder({
+    onRecorded: ({ blob, mimeType }) => {
+      setVoiceProcessing(true);
+      void sendVoiceQuery(blob, mimeType);
+    },
+    onError: (message) => {
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: `err-${Date.now()}`,
+          query: "",
+          isLoading: false,
+          error: message,
+        },
+      ]);
+    },
+  });
+  const voiceState: VoiceState = voiceProcessing
+    ? "processing"
+    : recorder.status === "recording"
+      ? "listening"
+      : "idle";
 
-  // ── Auto-scroll on new messages ────────────────────────────────────────────
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -527,7 +454,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
     };
   }, [query, isLoading]);
 
-  // ── Health poll ────────────────────────────────────────────────────────────
 
   useEffect(() => {
     async function checkHealth() {
@@ -538,7 +464,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
     return () => clearInterval(id);
   }, []);
 
-  // ── Close dropdown on outside click ───────────────────────────────────────
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -553,13 +478,11 @@ export default function MainShell({ initialUsers }: MainShellProps) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
 
   function resolveUser(userId?: string) {
     return userId ? users.find((u) => u.user_id === userId) : undefined;
   }
 
-  // ── Text query ─────────────────────────────────────────────────────────────
 
   async function sendTextQuery(text: string) {
     if (!text.trim() || isLoading) return;
@@ -629,54 +552,10 @@ export default function MainShell({ initialUsers }: MainShellProps) {
     }
   }
 
-  // ── Voice recording ────────────────────────────────────────────────────────
-
-  async function startRecording() {
-    if (voiceState !== "idle") return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const recorder = new MediaRecorder(stream, { mimeType });
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        setVoiceState("processing");
-        const blob = new Blob(audioChunksRef.current, { type: mimeType });
-        await sendVoiceQuery(blob, mimeType);
-      };
-
-      recorder.start(100);
-      mediaRecorderRef.current = recorder;
-      setVoiceState("listening");
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err-${Date.now()}`,
-          query: "",
-          isLoading: false,
-          error: "Microphone access denied. Please allow microphone permissions.",
-        },
-      ]);
-    }
-  }
-
-  function stopRecording() {
-    if (mediaRecorderRef.current && voiceState === "listening") {
-      mediaRecorderRef.current.stop();
-    }
-  }
 
   function handleVoiceButtonClick() {
-    if (voiceState === "idle") startRecording();
-    else if (voiceState === "listening") stopRecording();
+    if (voiceState === "idle") void recorder.start();
+    else if (voiceState === "listening") recorder.stop();
   }
 
   async function sendVoiceQuery(blob: Blob, mimeType: string) {
@@ -704,7 +583,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
       });
       setConversationId(data.conversation_id);
 
-      // Resolve user from recognized speaker if not pre-selected
       const resolvedUser =
         data.recognized_user ??
         (selectedUserId ? resolveUser(selectedUserId) : undefined);
@@ -736,24 +614,20 @@ export default function MainShell({ initialUsers }: MainShellProps) {
         )
       );
     } finally {
-      setVoiceState("idle");
+      setVoiceProcessing(false);
       setIsLoading(false);
     }
   }
 
-  // ── Derived ────────────────────────────────────────────────────────────────
 
   const selectedUser = users.find((u) => u.user_id === selectedUserId);
 
-  // ── Render ─────────────────────────────────────────────────────────────────
 
   const hasMessages = messages.length > 0;
 
   return (
     <div className="relative h-dvh w-full flex flex-col overflow-hidden">
-      {/* ── Header ── */}
       <header className="flex-none flex items-center justify-between px-5 md:px-8 py-4 border-b border-white/[0.06] glass-elevated z-20">
-        {/* Logo */}
         <div className="flex items-center gap-2.5">
           <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-violet-600/20 border border-violet-500/30">
             <Quote size={14} className="text-violet-400" />
@@ -769,11 +643,9 @@ export default function MainShell({ initialUsers }: MainShellProps) {
           </div>
         </div>
 
-        {/* Right controls */}
         <div className="flex items-center gap-3">
           <HealthDots health={health} />
 
-          {/* User selector */}
           <div className="relative" ref={userDropdownRef}>
             <button
               onClick={() => setShowUserDropdown((v) => !v)}
@@ -796,14 +668,9 @@ export default function MainShell({ initialUsers }: MainShellProps) {
               />
             </button>
 
-            <AnimatePresence>
-              {showUserDropdown && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-full mt-2 w-48 glass-elevated rounded-xl border border-white/[0.10] shadow-glass-lg z-50 overflow-hidden"
+            {showUserDropdown && (
+                <div
+                  className="absolute right-0 top-full mt-2 w-48 glass-elevated rounded-xl border border-white/[0.10] shadow-glass-lg z-50 overflow-hidden animate-[fade-up_0.15s_ease-out]"
                 >
                   <button
                     onClick={() => {
@@ -841,12 +708,10 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                       )}
                     </button>
                   ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+                </div>
+            )}
           </div>
 
-          {/* Manage users */}
           <Link
             href="/users"
             className="btn-secondary py-1.5 px-3 text-xs"
@@ -856,7 +721,6 @@ export default function MainShell({ initialUsers }: MainShellProps) {
             <span className="hidden sm:block">Users</span>
           </Link>
 
-          {/* Add user */}
           <Link
             href="/register"
             className="btn-primary py-1.5 px-3 text-xs"
@@ -868,26 +732,15 @@ export default function MainShell({ initialUsers }: MainShellProps) {
         </div>
       </header>
 
-      {/* ── Body: switches between centered (empty) and chat (active) ── */}
-      <LayoutGroup>
-        <AnimatePresence mode="popLayout" initial={false}>
-          {!hasMessages ? (
-            /* ── Empty state: centered prompt ── */
-            <motion.div
+      {!hasMessages ? (
+            <div
               key="empty"
-              className="flex-1 flex flex-col items-center justify-center px-4 md:px-8 pb-6 min-h-0 overflow-y-auto"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0, y: -16, transition: { duration: 0.2 } }}
+              className="flex-1 flex flex-col items-center justify-center px-4 md:px-8 pb-6 min-h-0 overflow-y-auto animate-[fade-up_0.3s_ease-out]"
             >
               <div className="w-full max-w-2xl flex flex-col items-center gap-12">
 
-                {/* Hero */}
-                <motion.div
-                  className="flex flex-col items-center text-center"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                <div
+                  className="flex flex-col items-center text-center animate-[fade-up_0.55s_ease-out]"
                 >
                   <div className="w-24 h-24 rounded-3xl bg-violet-600/15 border border-violet-500/20 flex items-center justify-center mb-7">
                     <Quote size={42} className="text-violet-400/70" />
@@ -898,14 +751,10 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                   <p className="text-white/55 text-lg md:text-xl max-w-lg leading-relaxed">
                     Type the beginning of any quote — the system finds the full text and reads it back in your personalized voice.
                   </p>
-                </motion.div>
+                </div>
 
-                {/* Capability pills */}
-                <motion.div
-                  className="flex flex-wrap justify-center gap-3"
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+                <div
+                  className="flex flex-wrap justify-center gap-3 animate-[fade-up_0.5s_ease-out]"
                 >
                   {[
                     { icon: <Mic size={20} className="text-violet-400" />, label: "Voice queries", desc: "Speak or type" },
@@ -924,13 +773,10 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                       </div>
                     </div>
                   ))}
-                </motion.div>
+                </div>
 
-                {/* Input — centered; FLIP-animates to bottom on first message */}
-                <motion.div
-                  layoutId="chat-input"
+                <div
                   className="w-full"
-                  transition={{ type: "spring", stiffness: 300, damping: 30 }}
                 >
                   <InputForm
                     large
@@ -955,27 +801,16 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                       )}
                     </p>
                   )}
-                </motion.div>
+                </div>
 
-                {/* Example partial quotes */}
-                <motion.div
-                  className="w-full flex flex-col items-center gap-5"
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                <div
+                  className="w-full flex flex-col items-center gap-5 animate-[fade-up_0.5s_ease-out]"
                 >
                   <p className="text-sm text-white/30 font-semibold uppercase tracking-[0.2em]">
                     Try these
                   </p>
                   <div className="flex flex-wrap justify-center gap-3">
-                    {[
-                      "To be, or not to be,",
-                      "Ask not what your country",
-                      "It was the best of times",
-                      "I have a dream that one",
-                      "The only thing we have to fear",
-                      "That's one small step for",
-                    ].map((ex) => (
+                    {NEXT_SUGGESTIONS.map((ex) => (
                       <button
                         key={ex}
                         onClick={() => {
@@ -992,20 +827,15 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                       </button>
                     ))}
                   </div>
-                </motion.div>
+                </div>
 
               </div>
-            </motion.div>
+            </div>
           ) : (
-            /* ── Active state: chat thread + bottom bar ── */
-            <motion.div
+            <div
               key="chat"
-              className="flex-1 flex flex-col min-h-0"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              className="flex-1 flex flex-col min-h-0 animate-[fade-up_0.2s_ease-out]"
             >
-              {/* Chat thread */}
               <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 min-h-0">
                 <div className="mx-auto w-full max-w-2xl flex flex-col gap-5">
                   {messages.map((msg) => (
@@ -1015,11 +845,8 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                 </div>
               </div>
 
-              {/* Bottom input bar — animates in from center via layoutId */}
-              <motion.div
-                layoutId="chat-input"
+              <div
                 className="flex-none border-t border-white/[0.06] glass-elevated px-4 md:px-8 py-5"
-                transition={{ type: "spring", stiffness: 300, damping: 30 }}
               >
                 <div className="mx-auto w-full max-w-2xl">
                   <InputForm
@@ -1045,11 +872,9 @@ export default function MainShell({ initialUsers }: MainShellProps) {
                     </p>
                   )}
                 </div>
-              </motion.div>
-            </motion.div>
+              </div>
+            </div>
           )}
-        </AnimatePresence>
-      </LayoutGroup>
 
     </div>
   );

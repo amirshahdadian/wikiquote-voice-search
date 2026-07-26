@@ -40,7 +40,7 @@ class VoiceService:
     @property
     def tts_service(self) -> TTSService:
         if self._tts_service is None:
-            self._tts_service = TTSService(device="cpu", db_path=str(self.settings.resolved_db_path))
+            self._tts_service = TTSService(db_path=str(self.settings.resolved_db_path))
         return self._tts_service
 
     def health_flags(self, search_ready: bool) -> dict[str, bool]:

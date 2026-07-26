@@ -55,7 +55,7 @@ VOICES_URL = (
 
 
 class TTSService:
-    def __init__(self, device: str = "cpu", db_path: str | None = None):
+    def __init__(self, db_path: str | None = None):
         self.db_path = db_path
         self._kokoro: Any | None = None
 

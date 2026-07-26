@@ -1,15 +1,10 @@
 "use client";
 
-import { motion } from "motion/react";
-
 interface VoiceWaveformProps {
   active: boolean;
   amplitude?: number;
 }
 
-const BAR_COUNT = 7;
-
-// Each bar has a natural "rest" height and animation duration offset
 const BAR_CONFIG = [
   { delay: 0.0, baseHeight: 8 },
   { delay: 0.1, baseHeight: 14 },
@@ -34,36 +29,17 @@ export default function VoiceWaveform({
         const restHeight = Math.max(3, bar.baseHeight * 0.3);
 
         return (
-          <motion.span
+          <span
             key={i}
-            className="rounded-full w-[3px]"
+            className={active ? "w-[3px] rounded-full animate-[bar-bounce_0.8s_ease-in-out_infinite]" : "w-[3px] rounded-full"}
             style={{
               background: active
                 ? `linear-gradient(180deg, #c4b5fd 0%, #8b5cf6 100%)`
                 : "rgba(255,255,255,0.2)",
+              height: active ? maxHeight : restHeight,
+              opacity: active ? undefined : 0.25,
+              animationDelay: `${bar.delay}s`,
             }}
-            animate={
-              active
-                ? {
-                    height: [restHeight, maxHeight, restHeight],
-                    opacity: [0.5, 1, 0.5],
-                  }
-                : {
-                    height: restHeight,
-                    opacity: 0.25,
-                  }
-            }
-            transition={
-              active
-                ? {
-                    duration: 0.8,
-                    delay: bar.delay,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }
-                : { duration: 0.3, ease: "easeOut" }
-            }
-            initial={{ height: restHeight, opacity: 0.25 }}
           />
         );
       })}

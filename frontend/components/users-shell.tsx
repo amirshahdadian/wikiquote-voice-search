@@ -1,6 +1,5 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -19,13 +18,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import {
-  useCallback,
   useEffect,
   useRef,
   useState,
   type ChangeEvent,
 } from "react";
-import type { UserProfile } from "@/lib/types";
+import type { LocalAudioSample, UserProfile } from "@/lib/types";
 import {
   createTtsPreview,
   deleteUserProfile,
@@ -33,56 +31,19 @@ import {
   reEnrollUser,
   resolveApiUrl,
 } from "@/lib/api";
+import { audioExtension, useAudioRecorder } from "@/lib/use-audio-recorder";
 
 const cn = (...classes: (string | false | null | undefined)[]) =>
   classes.filter(Boolean).join(" ");
 
-// ── Voice label map ────────────────────────────────────────────────────────────
-const VOICE_LABELS: Record<string, { label: string; flag: string }> = {
-  af_heart:    { label: "Heart",    flag: "🇺🇸" },
-  af_bella:    { label: "Bella",    flag: "🇺🇸" },
-  af_nicole:   { label: "Nicole",   flag: "🇺🇸" },
-  af_sarah:    { label: "Sarah",    flag: "🇺🇸" },
-  af_sky:      { label: "Sky",      flag: "🇺🇸" },
-  af_alloy:    { label: "Alloy",    flag: "🇺🇸" },
-  af_aoede:    { label: "Aoede",    flag: "🇺🇸" },
-  af_jessica:  { label: "Jessica",  flag: "🇺🇸" },
-  af_kore:     { label: "Kore",     flag: "🇺🇸" },
-  af_nova:     { label: "Nova",     flag: "🇺🇸" },
-  af_river:    { label: "River",    flag: "🇺🇸" },
-  am_adam:     { label: "Adam",     flag: "🇺🇸" },
-  am_michael:  { label: "Michael",  flag: "🇺🇸" },
-  am_echo:     { label: "Echo",     flag: "🇺🇸" },
-  am_eric:     { label: "Eric",     flag: "🇺🇸" },
-  am_fenrir:   { label: "Fenrir",   flag: "🇺🇸" },
-  am_liam:     { label: "Liam",     flag: "🇺🇸" },
-  am_onyx:     { label: "Onyx",     flag: "🇺🇸" },
-  am_puck:     { label: "Puck",     flag: "🇺🇸" },
-  bf_emma:     { label: "Emma",     flag: "🇬🇧" },
-  bf_isabella: { label: "Isabella", flag: "🇬🇧" },
-  bf_alice:    { label: "Alice",    flag: "🇬🇧" },
-  bf_lily:     { label: "Lily",     flag: "🇬🇧" },
-  bm_george:   { label: "George",   flag: "🇬🇧" },
-  bm_lewis:    { label: "Lewis",    flag: "🇬🇧" },
-  bm_daniel:   { label: "Daniel",   flag: "🇬🇧" },
-  bm_fable:    { label: "Fable",    flag: "🇬🇧" },
-};
-
 function voiceLabel(style?: string | null) {
   if (!style) return null;
-  const v = VOICE_LABELS[style];
-  return v ? `${v.flag} ${v.label}` : style;
+  const [voice, name] = style.split("_", 2);
+  if (!name) return style;
+  const flag = voice.startsWith("b") ? "🇬🇧" : "🇺🇸";
+  return `${flag} ${name[0].toUpperCase()}${name.slice(1)}`;
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface RecordedSample {
-  id: string;
-  blob: Blob;
-  url: string;
-  name: string;
-}
-
-// ── Avatar ────────────────────────────────────────────────────────────────────
 function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg" }) {
   const letter = name.charAt(0).toUpperCase();
   const colors = [
@@ -102,7 +63,6 @@ function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg"
   );
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
 export default function UsersShell({ initialUsers }: { initialUsers: UserProfile[] }) {
   const [users, setUsers] = useState<UserProfile[]>(initialUsers);
   const [isLoading, setIsLoading] = useState(false);
@@ -156,7 +116,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
 
   return (
     <div className="min-h-dvh flex flex-col">
-      {/* ── Header ── */}
       <header className="flex-none flex items-center justify-between px-5 md:px-8 py-4 border-b border-white/[0.06] glass-elevated sticky top-0 z-20">
         <div className="flex items-center gap-3">
           <Link
@@ -188,14 +147,9 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
         </div>
       </header>
 
-      {/* ── Body ── */}
       <main className="flex-1 px-4 md:px-8 py-8 max-w-4xl mx-auto w-full">
-        {/* Page title */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-          className="mb-8"
+        <div
+          className="mb-8 animate-[fade-up_0.5s_ease-out]"
         >
           <h2 className="text-2xl font-bold tracking-tight text-white/90 mb-1">
             Enrolled <span className="gradient-text">Speakers</span>
@@ -203,37 +157,27 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
           <p className="text-sm text-white/40">
             Each user has a unique voice for TTS responses and a speaker embedding for voice identification.
           </p>
-        </motion.div>
+        </div>
 
-        {/* ── User grid ── */}
-        <AnimatePresence mode="popLayout">
-          {users.length === 0 ? (
-            <motion.div
+        {users.length === 0 ? (
+            <div
               key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="glass ring-1 ring-white/5 rounded-2xl px-8 py-16 text-center"
+              className="glass ring-1 ring-white/5 rounded-2xl px-8 py-16 text-center animate-[fade-up_0.3s_ease-out]"
             >
               <User size={32} className="mx-auto text-white/20 mb-3" />
               <p className="text-white/50 text-sm mb-1">No users enrolled yet</p>
               <p className="text-white/30 text-xs">Click "Add user" to enroll the first speaker</p>
-            </motion.div>
+            </div>
           ) : (
-            <motion.div
+            <div
               key="grid"
               className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
             >
-              {users.map((user, i) => (
-                <motion.div
+              {users.map((user) => (
+                <div
                   key={user.user_id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ duration: 0.35, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
-                  className="glass ring-1 ring-white/5 rounded-2xl p-5 flex flex-col gap-4 group hover:bg-white/[0.09] transition-colors duration-300"
+                  className="glass ring-1 ring-white/5 rounded-2xl p-5 flex flex-col gap-4 group hover:bg-white/[0.09] transition-colors duration-300 animate-[fade-up_0.35s_ease-out]"
                 >
-                  {/* Top row */}
                   <div className="flex items-start gap-3">
                     <Avatar name={user.display_name} size="md" />
                     <div className="flex-1 min-w-0">
@@ -246,9 +190,7 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
                     </div>
                   </div>
 
-                  {/* Status badges */}
                   <div className="flex flex-wrap gap-1.5">
-                    {/* Voice badge */}
                     {user.preferences?.style && (
                       <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 bg-violet-500/15 border border-violet-500/20 text-[11px] font-medium text-violet-300">
                         <Volume2 size={10} />
@@ -256,7 +198,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
                       </span>
                     )}
 
-                    {/* Embedding badge */}
                     {user.has_embedding ? (
                       <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 bg-emerald-500/15 border border-emerald-500/20 text-[11px] font-medium text-emerald-300">
                         <CheckCircle2 size={10} />
@@ -270,7 +211,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
                     )}
                   </div>
 
-                  {/* TTS speed pill */}
                   {user.preferences && (
                     <div className="flex gap-3 text-[11px] text-white/30">
                       <span>Speed <span className="text-white/60">{user.preferences.speaking_rate.toFixed(1)}×</span></span>
@@ -278,9 +218,7 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
                     </div>
                   )}
 
-                  {/* Actions */}
                   <div className="flex items-center gap-2 mt-auto pt-1 border-t border-white/[0.06]">
-                    {/* Preview voice */}
                     <button
                       onClick={() => previewVoice(user)}
                       className={cn(
@@ -298,7 +236,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
                       )}
                     </button>
 
-                    {/* Re-enroll */}
                     <button
                       onClick={() => setReEnrollTarget(user)}
                       className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium bg-white/[0.06] hover:bg-white/[0.11] text-white/60 hover:text-white border border-white/[0.08] transition-all duration-200"
@@ -308,7 +245,6 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
                       Re-enroll
                     </button>
 
-                    {/* Delete */}
                     <button
                       onClick={() => setDeleteTarget(user)}
                       className="flex items-center justify-center rounded-xl p-2 text-xs font-medium bg-white/[0.06] hover:bg-red-500/20 text-white/40 hover:text-red-300 border border-white/[0.08] hover:border-red-500/30 transition-all duration-200"
@@ -317,27 +253,21 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
                       <Trash2 size={13} />
                     </button>
                   </div>
-                </motion.div>
+                </div>
               ))}
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
       </main>
 
-      {/* ── Delete confirmation modal ── */}
-      <AnimatePresence>
-        {deleteTarget && (
+      {deleteTarget && (
           <ConfirmDeleteModal
             user={deleteTarget}
             onConfirm={() => deleteUser(deleteTarget.user_id)}
             onCancel={() => setDeleteTarget(null)}
           />
-        )}
-      </AnimatePresence>
+      )}
 
-      {/* ── Re-enroll modal ── */}
-      <AnimatePresence>
-        {reEnrollTarget && (
+      {reEnrollTarget && (
           <ReEnrollModal
             user={reEnrollTarget}
             onClose={() => setReEnrollTarget(null)}
@@ -346,14 +276,12 @@ export default function UsersShell({ initialUsers }: { initialUsers: UserProfile
               setReEnrollTarget(null);
             }}
           />
-        )}
-      </AnimatePresence>
+      )}
 
     </div>
   );
 }
 
-// ── Confirm delete ─────────────────────────────────────────────────────────────
 function ConfirmDeleteModal({
   user,
   onConfirm,
@@ -365,12 +293,8 @@ function ConfirmDeleteModal({
 }) {
   return (
     <ModalOverlay onClose={onCancel}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.94, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.94, y: 12 }}
-        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-        className="glass ring-1 ring-white/5 rounded-2xl p-6 w-full max-w-sm shadow-glass-lg"
+      <div
+        className="glass ring-1 ring-white/5 rounded-2xl p-6 w-full max-w-sm shadow-glass-lg animate-[fade-up_0.2s_ease-out]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 mb-4">
@@ -398,12 +322,11 @@ function ConfirmDeleteModal({
             Delete
           </button>
         </div>
-      </motion.div>
+      </div>
     </ModalOverlay>
   );
 }
 
-// ── Re-enroll modal ────────────────────────────────────────────────────────────
 function ReEnrollModal({
   user,
   onClose,
@@ -424,7 +347,7 @@ function ReEnrollModal({
             user.user_id,
             samples.map((sample) => ({
               blob: sample.blob,
-              name: `${sample.name}.${sample.blob.type.includes("webm") ? "webm" : "wav"}`,
+              name: sample.name,
             }))
           );
         }}
@@ -434,7 +357,6 @@ function ReEnrollModal({
   );
 }
 
-// ── Shared recording form ──────────────────────────────────────────────────────
 function RecordingForm({
   title,
   subtitle,
@@ -445,49 +367,28 @@ function RecordingForm({
   title: string;
   subtitle: string;
   onClose: () => void;
-  onSubmit: (samples: RecordedSample[]) => Promise<UserProfile>;
+  onSubmit: (samples: LocalAudioSample[]) => Promise<UserProfile>;
   onSuccess: (user: UserProfile) => void;
 }) {
-  const [samples, setSamples] = useState<RecordedSample[]>([]);
-  const [recordingState, setRecordingState] = useState<"idle" | "recording">("idle");
+  const [samples, setSamples] = useState<LocalAudioSample[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  async function startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const recorder = new MediaRecorder(stream, { mimeType });
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      recorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        setSamples((prev) => [
-          ...prev,
-          { id: `rec-${Date.now()}`, blob, url, name: `Sample ${prev.length + 1}` },
-        ]);
-        setRecordingState("idle");
-      };
-      recorder.start(100);
-      mediaRecorderRef.current = recorder;
-      setRecordingState("recording");
-    } catch {
-      setError("Microphone access denied.");
-    }
-  }
-
-  function stopRecording() {
-    if (mediaRecorderRef.current && recordingState === "recording") {
-      mediaRecorderRef.current.stop();
-    }
-  }
+  const recorder = useAudioRecorder({
+    onRecorded: ({ blob, mimeType }) => {
+      setSamples((previous) => [
+        ...previous,
+        {
+          id: crypto.randomUUID(),
+          blob,
+          url: URL.createObjectURL(blob),
+          name: `recording-${Date.now()}.${audioExtension(mimeType)}`,
+          source: "recorded",
+        },
+      ]);
+    },
+    onError: setError,
+  });
 
   function removeSample(id: string) {
     setSamples((prev) => {
@@ -502,10 +403,11 @@ function RecordingForm({
     setSamples((prev) => [
       ...prev,
       ...files.map((f) => ({
-        id: `file-${Date.now()}-${Math.random()}`,
+        id: crypto.randomUUID(),
         blob: f,
         url: URL.createObjectURL(f),
         name: f.name,
+        source: "uploaded" as const,
       })),
     ]);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -527,15 +429,10 @@ function RecordingForm({
   const canSubmit = samples.length >= 3 && !submitting;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96, y: 16 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.96, y: 16 }}
-      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-      className="glass ring-1 ring-white/5 rounded-2xl p-6 w-full max-w-md shadow-glass-lg"
+    <div
+      className="glass ring-1 ring-white/5 rounded-2xl p-6 w-full max-w-md shadow-glass-lg animate-[fade-up_0.25s_ease-out]"
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Header */}
       <div className="flex items-start justify-between mb-5">
         <div>
           <h2 className="font-semibold text-white/90 text-base">{title}</h2>
@@ -546,7 +443,6 @@ function RecordingForm({
         </button>
       </div>
 
-      {/* Samples list */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-1.5">
           <label className="text-xs font-medium text-white/50">
@@ -561,14 +457,10 @@ function RecordingForm({
         </div>
 
         <div className="space-y-1.5 mb-2">
-          <AnimatePresence>
-            {samples.map((s) => (
-              <motion.div
+          {samples.map((s) => (
+              <div
                 key={s.id}
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="flex items-center gap-2 rounded-xl bg-white/[0.05] border border-white/[0.07] px-3 py-2"
+                className="flex items-center gap-2 rounded-xl bg-white/[0.05] border border-white/[0.07] px-3 py-2 animate-[fade-up_0.2s_ease-out]"
               >
                 <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
                 <span className="text-xs text-white/60 flex-1 truncate">{s.name}</span>
@@ -579,23 +471,21 @@ function RecordingForm({
                 >
                   <X size={12} />
                 </button>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+              </div>
+          ))}
         </div>
 
-        {/* Record / upload buttons */}
         <div className="flex gap-2">
           <button
-            onClick={recordingState === "idle" ? startRecording : stopRecording}
+            onClick={recorder.status === "recording" ? recorder.stop : recorder.start}
             className={cn(
               "flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-semibold border transition-all duration-300",
-              recordingState === "recording"
+              recorder.status === "recording"
                 ? "bg-red-600/80 border-red-500/50 text-white shadow-[0_0_20px_rgba(239,68,68,0.3)]"
                 : "bg-white/[0.07] border-white/[0.1] text-white/70 hover:bg-white/[0.11]"
             )}
           >
-            {recordingState === "recording" ? (
+            {recorder.status === "recording" ? (
               <><span className="w-2 h-2 rounded-sm bg-white animate-pulse" /> Stop</>
             ) : (
               <><Mic size={13} /> Record</>
@@ -618,14 +508,12 @@ function RecordingForm({
         </div>
       </div>
 
-      {/* Error */}
       {error && (
         <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2 mb-3">
           {error}
         </p>
       )}
 
-      {/* Submit */}
       <button
         onClick={handleSubmit}
         disabled={!canSubmit}
@@ -637,11 +525,10 @@ function RecordingForm({
           "Save"
         )}
       </button>
-    </motion.div>
+    </div>
   );
 }
 
-// ── Modal overlay ─────────────────────────────────────────────────────────────
 function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -650,16 +537,12 @@ function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClos
   }, [onClose]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-[fade-up_0.2s_ease-out]"
       style={{ background: "rgba(7,8,15,0.8)", backdropFilter: "blur(8px)" }}
       onClick={onClose}
     >
       {children}
-    </motion.div>
+    </div>
   );
 }

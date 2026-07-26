@@ -90,4 +90,45 @@ describe("MainShell", () => {
     expect(screen.getByText(/Wikiquote: Courage/i)).toBeInTheDocument();
     expect(screen.getByText(/Interview, 1954/i)).toBeInTheDocument();
   });
+
+  it("uses the quote card as the single response audio player", async () => {
+    const play = vi.fn().mockResolvedValue(undefined);
+    const pause = vi.fn();
+    const AudioMock = vi.fn(function () {
+      return {
+        currentTime: 0,
+        onended: null,
+        onerror: null,
+        pause,
+        play,
+      };
+    });
+    vi.stubGlobal("Audio", AudioMock);
+    apiMocks.sendChatQuery.mockResolvedValueOnce({
+      conversation_id: "conversation-1",
+      intent_type: "topic",
+      response_text: "A response",
+      best_quote: {
+        quote_id: "quote-audio",
+        quote_text: "A spoken quotation.",
+        page_title: "Audio",
+      },
+      related_quotes: [],
+      audio_url: "/api/audio/response.wav",
+      warnings: [],
+    });
+
+    const user = userEvent.setup();
+    render(<MainShell initialUsers={[]} />);
+    await user.type(
+      screen.getByPlaceholderText("Type part of a quote…"),
+      "spoken",
+    );
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await screen.findByRole("button", { name: /^Stop audio$/i });
+    expect(AudioMock).toHaveBeenCalledTimes(1);
+
+    vi.unstubAllGlobals();
+  });
 });
