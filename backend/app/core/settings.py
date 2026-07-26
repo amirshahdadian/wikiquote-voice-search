@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     neo4j_uri: str = "neo4j://127.0.0.1:7687"
     neo4j_username: str = "neo4j"
     neo4j_password: str = "neo4j"
+
+    gemini_api_key: SecretStr | None = None
+    gemini_llm_model: str = "gemini-3.5-flash-lite"
+    gemini_embedding_model: str = "gemini-embedding-2"
+    gemini_embedding_dimensions: int = 768
+    gemini_timeout_seconds: float = 8.0
+    gemini_max_retries: int = 2
 
     batch_size: int = 1000
     search_limit: int = 5
