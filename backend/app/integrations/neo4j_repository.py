@@ -217,12 +217,23 @@ class Neo4jQuoteRepository:
         with self.driver.session() as session:
             record = session.run(
                 "MATCH (n) WHERE n:QuoteOccurrence OR n:Source "
+                "OR n:PrimaryQuote OR n:SecondaryQuote "
                 "RETURN count(n) > 0 AS legacy"
             ).single()
         return bool(record and record["legacy"])
 
-    def verify_counts(self) -> dict[str, int]:
-        labels = ("Quote", "Attribution", "Author", "Work", "WikiquotePage")
+    def verify_counts(self, model: str, dimensions: int) -> dict[str, int]:
+        labels = (
+            "Quote",
+            "Attribution",
+            "Author",
+            "Work",
+            "WikiquotePage",
+            "QuoteOccurrence",
+            "Source",
+            "PrimaryQuote",
+            "SecondaryQuote",
+        )
         counts: dict[str, int] = {}
         with self.driver.session() as session:
             for label in labels:
@@ -230,6 +241,19 @@ class Neo4jQuoteRepository:
                     f"MATCH (n:{label}) RETURN count(n) AS count"
                 ).single()
                 counts[label] = int(record["count"])
+            record = session.run(
+                """
+                MATCH (q:Quote)
+                WHERE q.embedding IS NULL
+                   OR q.embedding_model IS NULL
+                   OR q.embedding_model <> $model
+                   OR q.embedding_dimensions <> $dimensions
+                RETURN count(q) AS count
+                """,
+                model=model,
+                dimensions=dimensions,
+            ).single()
+            counts["quotes_without_current_embedding"] = int(record["count"])
         return counts
 
     def pending_embedding_rows(

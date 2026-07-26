@@ -1,226 +1,223 @@
-# Wikiquote Voice Search
+# Which Quote?
 
-Wikiquote Voice Search is the repository for the Master's in Data Science Natural Language Processing course project **"Which Quote?"**. The project follows the two mandatory steps assigned in the instructions:
+Which Quote? is a Wikiquote search and voice interface built for a Natural
+Language Processing course project. It imports the English Wikiquote dump into
+Neo4j, completes remembered quote fragments, answers topic and author queries,
+and can read results with a voice assigned to an enrolled user.
 
-- **Step 1**: build a Wikiquote graph database from the official English Wikiquote dump, create a full-text citation index, and provide quote autocomplete with source attribution.
-- **Step 2**: build an interactive multi-user voice system on top of Step 1, with ASR, speaker identification, conversational querying, and personalized TTS responses.
+The application uses Gemini for two narrow jobs:
 
-This repository implements those requirements as a monorepo with:
+1. classify a request into a typed search intent;
+2. create query and document embeddings.
 
-- a `FastAPI` backend in Python
-- a `Next.js` frontend
-- a Neo4j-backed quote graph
+Gemini never writes quotations and never produces Cypher. Every quote and every
+attribution shown to a user comes from Neo4j.
 
-## Course Context
+## Architecture
 
-The project instructions require to implement:
-
-1. **Autocomplete over Wikiquote** using a graph database built from the official dump.
-2. **"Which Quote?" voice interaction** with:
-   - automatic speech recognition
-   - speaker recognition through stored voice embeddings
-   - a chatbot layer over the quote graph
-   - personalized text-to-speech
-
-The project instructions mention technologies such as Whisper, Wav2Vec2, and NVIDIA NeMo as examples. In this implementation, equivalent pre-trained components were selected to fit the target hardware (That is a MacBook with Apple Sillicon processor) and environment:
-
-- ASR: `mlx-whisper`
-- Speaker identification: `resemblyzer`
-- TTS: `kokoro-onnx` with `gTTS` fallback
-
-## Current Repository Shape
+The graph has five node labels and four relationship types:
 
 ```text
-wikiquote-voice-search/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── routers/
-│   │   │   └── schemas/
-│   │   ├── cli/
-│   │   ├── core/
-│   │   ├── integrations/
-│   │   │   └── audio/
-│   │   ├── services/
-│   │   ├── container.py
-│   │   └── main.py
-│   └── tests/
-├── frontend/
-│   ├── app/
-│   ├── components/
-│   ├── lib/
-│   └── tests/
-├── data/
-├── pyproject.toml
-├── pytest.ini
-├── requirements.txt
-└── README.md
+(Quote)-[:HAS_ATTRIBUTION]->(Attribution)
+                               |--[:ATTRIBUTED_TO]->(Author)
+                               |--[:FROM_WORK]->(Work)
+                               `--[:FOUND_ON]->(WikiquotePage)
 ```
 
-Notes:
+`Quote` stores only the quotation and its embedding. `Attribution` stores
+citation, status, locator, year, and section. This matters because the same
+words can appear on several Wikiquote pages with different attribution claims.
+Page and revision IDs are kept so an imported statement can be traced back to
+the dump.
 
-- `backend/app/*` is the canonical Python backend.
-- operational CLI logic lives under `backend/app/cli/*`
-- the old `scripts/`, `services/`, and `src/` trees have been removed
+A query follows a short, fixed workflow:
 
-## Core Capabilities
+```text
+request -> Gemini intent -> Neo4j retrieval -> deterministic response
+```
 
-- Parse the official Wikiquote XML dump with `mwparserfromhell`
-- Extract, normalize, validate, and deduplicate quotes
-- Populate a Neo4j graph with `Author`, `Quote`, `QuoteOccurrence`, `Source`, and `Page`
-- Build full-text indexes for quote lookup and autocomplete
-- Support multi-strategy quote retrieval and author search
-- Provide a FastAPI API for chat, quote search, users, voice queries, TTS preview, and audio serving
-- Support multi-user voice interaction with:
-  - ASR via `mlx-whisper`
-  - speaker recognition via `resemblyzer`
-  - personalized TTS via `kokoro-onnx`
+Topic searches combine Neo4j full-text and vector results with reciprocal rank
+fusion. Author and fragment searches use fixed Cypher queries. Autocomplete is
+lexical only, so typing does not make Gemini calls. If Gemini is unavailable,
+topic search still returns full-text results.
+
+LangGraph holds conversation state and runs three nodes: `interpret`,
+`retrieve`, and `respond`. It is a bounded workflow, not an autonomous agent.
+It cannot choose tools, create new steps, or execute model output.
+
+## Models and cost
+
+The default model IDs are:
+
+- `gemini-3.5-flash-lite` for intent classification
+- `gemini-embedding-2` at 768 dimensions for retrieval
+
+Google lists Gemini 3.5 Flash-Lite at $0.30 per million input tokens and $2.50
+per million output tokens. Gemini Embedding 2 costs $0.20 per million text
+tokens for normal requests and $0.10 per million text tokens through the Batch
+API. See the current [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
+before budgeting.
+
+For a rough example, an intent request with 200 input tokens and 50 output
+tokens costs about $0.000185. Ten thousand such requests cost about $1.85.
+Query embeddings add roughly $0.04 if each query is 20 tokens. A one-time
+backfill of 450,000 quotations averaging 40 to 60 tokens costs about $1.80 to
+$2.70 through the Batch API. Neo4j hosting, audio processing, taxes, and retry
+traffic are not included in these estimates.
+
+Use a Cloud project with active billing for deployed use. Google's
+[Gemini API terms](https://ai.google.dev/gemini-api/terms) state that paid
+service prompts and responses are not used to improve its products. The terms
+also describe limited logging for abuse prevention. Unpaid service data may be
+used differently, subject to regional rules. Do not put secrets or unnecessary
+personal data in prompts.
 
 ## Requirements
 
-- Python `3.11+`
-- Node.js `20+` recommended
-- Neo4j `5+`
-- a valid `.env` file copied from `.env.example`
+- Python 3.11 or newer
+- Node.js 20 or newer
+- Neo4j 5.26 or newer
+- a Gemini API key for intent classification and embeddings
+- the English Wikiquote pages and articles XML dump
 
-## Installation
+ASR uses `mlx-whisper`, speaker identification uses `resemblyzer`, and TTS uses
+`kokoro-onnx`. Voice features are optional at runtime. Text search still works
+when an audio model is not installed.
 
-### Python
+## Install
 
 ```bash
-git clone https://github.com/amirshahdadian/wikiquote-voice-search.git
-cd wikiquote-voice-search
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+
+cd frontend
+npm ci
+cd ..
+
 cp .env.example .env
 ```
 
-This also exposes the canonical CLI entrypoints:
+Set at least these values in `.env`:
 
-```bash
-which-quote-ingest
-which-quote-maintenance
-which-quote-users
+```dotenv
+NEO4J_URI=bolt://127.0.0.1:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=local-password
+GEMINI_API_KEY=...
+GEMINI_LLM_MODEL=gemini-3.5-flash-lite
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+GEMINI_EMBEDDING_DIMENSIONS=768
 ```
 
-### Frontend
+Keep `.env` out of Git. The application logs model name, intent, token counts,
+latency, and fallback reason. It does not log prompts, audio, API keys,
+embeddings, or full quotation text.
 
-```bash
-cd frontend
-npm install
-cd ..
-```
+## Build the graph
 
-## Configuration
-
-Edit `.env` with the Neo4j connection and any local overrides. Important values include:
-
-- `NEO4J_URI`
-- `NEO4J_USERNAME`
-- `NEO4J_PASSWORD`
-
-For a local Neo4j instance on macOS, `bolt://127.0.0.1:7687` is often simpler than `neo4j://127.0.0.1:7687`.
-
-## Step 1 Workflow
-
-### 1. Parse the Wikiquote dump
+Use an empty Neo4j database. The loader refuses a database containing legacy
+`QuoteOccurrence`, `Source`, `PrimaryQuote`, or `SecondaryQuote` labels.
 
 ```bash
 python -m backend.app.cli.ingest
+python -m backend.app.cli.maintenance schema
+python -m backend.app.cli.maintenance load
+python -m backend.app.cli.maintenance embed
+python -m backend.app.cli.maintenance verify
 ```
 
-or:
+The four maintenance commands are:
+
+- `schema`: create constraints plus full-text and vector indexes;
+- `load`: import `data/extracted_quotes.json`;
+- `embed`: submit, poll, or import one resumable Gemini batch;
+- `verify`: print current, legacy, and stale embedding counts.
+
+The `embed` command stores only the batch job name and model metadata under
+`artifacts/embeddings/current-job.json`. Run the same command again to poll a
+pending job. When a job succeeds, the command imports vectors in batches and
+removes the state file. It does not submit another job while one is active.
+
+For a small validation load:
 
 ```bash
-which-quote-ingest
+PARSE_PAGE_LIMIT=5000 python -m backend.app.cli.ingest
+python -m backend.app.cli.maintenance schema
+python -m backend.app.cli.maintenance load
+python -m backend.app.cli.maintenance embed
 ```
 
-### 2. Populate Neo4j
+After import, `verify` should report nonzero counts for `Quote`,
+`Attribution`, `Author`, `Work`, and `WikiquotePage`. Legacy label counts and
+`quotes_without_current_embedding` should all be zero.
+
+## Run
+
+Start the backend:
 
 ```bash
-python -m backend.app.cli.maintenance
-```
-
-### 3. Create the Neo4j indexes
-
-```bash
-python -m backend.app.cli.maintenance --create-index
-```
-
-or:
-
-```bash
-which-quote-maintenance --create-index
-```
-
-## Step 2 Workflow
-
-### 1. Start the FastAPI backend
-
-```bash
-source venv/bin/activate
 uvicorn backend.app.main:app --reload
 ```
 
-Interactive API docs:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-### 2. Start the Next.js frontend
+Start the frontend in another shell:
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-The frontend expects the API at `http://127.0.0.1:8000` by default. Override it if needed:
+The API is at `http://127.0.0.1:8000` and the web interface is at
+`http://127.0.0.1:3000`.
+
+## Test
+
+The normal test suite makes no paid API calls:
 
 ```bash
-export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
-```
-
-### 3. Enroll users for speaker recognition and personalized TTS
-
-```bash
-python -m backend.app.cli.users
-```
-
-or:
-
-```bash
-which-quote-users
-```
-
-## Testing
-
-### Backend
-
-```bash
-python3 -m compileall backend
+python -m compileall backend
 pytest -q
+
+cd frontend
+npm test
+npm run typecheck
+npm run build
 ```
 
-### Frontend
+The live quality gate requires a populated Neo4j database and explicit opt-in:
 
 ```bash
-cd frontend
-npm run test
-npm run typecheck
+RUN_LIVE_EVALUATION=1 pytest -m integration \
+  backend/tests/test_search_evaluation.py -q
 ```
 
-## Academic Deliverables
+The two-model intent benchmark is separate because it makes 80 paid model
+requests:
 
-According to the course instructions, the project delivery includes:
+```bash
+RUN_MODEL_BENCHMARK=1 pytest -m integration \
+  backend/tests/test_search_evaluation.py::test_intent_model_price_benchmark -q
+```
 
-- source code
-- a short written report
-- a live demo
-- a short presentation
+Keep `gemini-3.5-flash-lite` unless the cheaper candidate reaches at least 95
+percent intent accuracy without losing author and quote-fragment distinctions.
 
-This repository contains the codebase; the written report is in `REPORT.md`.
+## Database cutover
+
+Build and verify the new graph at a separate URI. Point the application to it
+only after the live evaluation and application checks pass. Keep the previous
+Neo4j store unchanged for seven days. Export or back it up with the standard
+Neo4j tools before removing it.
+
+## Project files
+
+- `backend/app/cli/ingest.py`: structural Wikiquote extraction
+- `backend/app/cli/maintenance.py`: schema, load, embedding, and verification
+- `backend/app/integrations/neo4j_repository.py`: fixed graph queries
+- `backend/app/integrations/gemini.py`: typed Gemini boundary
+- `backend/app/services/query_workflow.py`: bounded conversation workflow
+- `frontend/components/main-shell.tsx`: main text and voice interface
+- `REPORT.md`: design and evaluation report
 
 ## Contributors
 
@@ -228,6 +225,4 @@ This repository contains the codebase; the written report is in `REPORT.md`.
 - Mahtab Taheri
 - Yasaman Zahedan
 
-## License
-
-See `LICENSE`.
+See `LICENSE` for licensing information.

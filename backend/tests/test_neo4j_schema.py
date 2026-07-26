@@ -26,6 +26,35 @@ class RecordingDriver:
         return None
 
 
+class CountResult:
+    def __init__(self, count):
+        self.count = count
+
+    def single(self):
+        return {"count": self.count}
+
+
+class CountSession:
+    def __init__(self):
+        self.calls = []
+
+    def run(self, query, **parameters):
+        self.calls.append((query, parameters))
+        return CountResult(2 if "embedding_model" in query else 0)
+
+
+class CountDriver:
+    def __init__(self):
+        self.session_instance = CountSession()
+
+    @contextmanager
+    def session(self):
+        yield self.session_instance
+
+    def close(self):
+        pass
+
+
 def test_schema_has_only_explainable_constraints_and_indexes():
     joined = "\n".join(SCHEMA_STATEMENTS)
 
@@ -103,3 +132,18 @@ def test_runtime_search_uses_only_fixed_semantic_index_queries():
     assert "db.index.fulltext.queryNodes('author_name'" in author
     assert "db.index.fulltext.queryNodes('quote_text'" in autocomplete
     assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, author, autocomplete))
+
+
+def test_verification_reports_legacy_labels_and_stale_embeddings():
+    repository = Neo4jQuoteRepository(driver=CountDriver())
+
+    counts = repository.verify_counts("gemini-embedding-2", 768)
+
+    assert counts["QuoteOccurrence"] == 0
+    assert counts["Source"] == 0
+    assert counts["PrimaryQuote"] == 0
+    assert counts["SecondaryQuote"] == 0
+    assert counts["quotes_without_current_embedding"] == 2
+    query, parameters = repository.driver.session_instance.calls[-1]
+    assert "q.embedding_model <> $model" in query
+    assert parameters == {"model": "gemini-embedding-2", "dimensions": 768}

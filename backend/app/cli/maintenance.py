@@ -140,7 +140,10 @@ def run_command(
             )
             return None
         if args.command == "verify":
-            return graph.verify_counts()
+            return graph.verify_counts(
+                app_settings.gemini_embedding_model,
+                app_settings.gemini_embedding_dimensions,
+            )
         if args.command == "embed":
             service = gemini_service or create_gemini_service(app_settings)
             state = run_embedding_command(
