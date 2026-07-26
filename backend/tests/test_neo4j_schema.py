@@ -165,7 +165,7 @@ def test_runtime_search_uses_only_fixed_semantic_index_queries():
     assert "db.index.vector.queryNodes" not in vector
     assert "q.search_text CONTAINS $search_text" in fragment
     assert "db.index.fulltext.queryNodes('author_name'" in author
-    assert "db.index.fulltext.queryNodes('quote_text'" in autocomplete
+    assert "q.search_text CONTAINS $search_text" in autocomplete
     assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, fragment, author, autocomplete))
     assert "matched_author.name AS author_name" in author
     assert "matched_attribution.citation AS citation" in author

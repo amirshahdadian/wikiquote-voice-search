@@ -139,22 +139,6 @@ ORDER BY score DESC, quote_text
 LIMIT $limit
 """
 
-_AUTOCOMPLETE_QUERY = (
-    """
-CALL db.index.fulltext.queryNodes('quote_text', $query, {limit: $candidate_limit})
-YIELD node AS q, score
-"""
-    + _ATTRIBUTION_SUBQUERY
-    + """
-RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
-       citation, page_title, score
-ORDER BY CASE WHEN q.normalized_text STARTS WITH $normalized THEN 0 ELSE 1 END,
-         score DESC
-LIMIT $limit
-"""
-)
-
-
 def _entity_key(value: str | None) -> str | None:
     if not value or not value.strip():
         return None
@@ -167,13 +151,11 @@ def _search_text(value: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", normalized).split())
 
 
-def _lucene_query(value: str, *, prefix: bool = False) -> str:
+def _lucene_query(value: str) -> str:
     cleaned = re.sub(r'[+\-!(){}\[\]^"~*?:\\/]', " ", value)
     terms = cleaned.split()
     if not terms:
         return '""'
-    if prefix:
-        terms[-1] = f"{terms[-1]}*"
     return " AND ".join(terms)
 
 
@@ -404,13 +386,10 @@ class Neo4jQuoteRepository:
         )
 
     def autocomplete(self, text: str, limit: int) -> list[QuoteHit]:
-        normalized = " ".join(text.casefold().split())
         return self._query_hits(
-            _AUTOCOMPLETE_QUERY,
+            _FRAGMENT_QUERY,
             search_type="autocomplete",
-            query=_lucene_query(text, prefix=True),
-            normalized=normalized,
-            candidate_limit=max(limit * 10, 50),
+            search_text=_search_text(text),
             limit=limit,
         )
 
