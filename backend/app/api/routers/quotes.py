@@ -11,12 +11,13 @@ router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 
 
 @router.get("/search", response_model=list[QuoteResult])
-def search_quotes(
+async def search_quotes(
     query: str = Query(min_length=1),
     limit: int = Query(default=5, ge=1, le=20),
     search_service: QuoteSearchService = Depends(get_quote_search_service),
 ) -> list[QuoteResult]:
-    return [QuoteResult(**quote) for quote in search_service.search_quotes(query, limit=limit)]
+    quotes = await search_service.search_quotes(query, limit=limit)
+    return [QuoteResult(**quote) for quote in quotes]
 
 
 @router.get("/random", response_model=QuoteResult | None)
@@ -26,12 +27,13 @@ def get_random_quote(search_service: QuoteSearchService = Depends(get_quote_sear
 
 
 @router.get("/by-theme", response_model=list[QuoteResult])
-def search_by_theme(
+async def search_by_theme(
     theme: str = Query(min_length=1, description="Topic or theme (e.g. love, wisdom, courage)"),
     limit: int = Query(default=10, ge=1, le=30),
     search_service: QuoteSearchService = Depends(get_quote_search_service),
 ) -> list[QuoteResult]:
-    return [QuoteResult(**quote) for quote in search_service.search_by_theme(theme, limit=limit)]
+    quotes = await search_service.search_by_theme(theme, limit=limit)
+    return [QuoteResult(**quote) for quote in quotes]
 
 
 @router.get("/autocomplete", response_model=list[QuoteResult])
@@ -44,18 +46,20 @@ def autocomplete(
 
 
 @router.get("/intelligent-search", response_model=list[QuoteResult])
-def intelligent_search(
+async def intelligent_search(
     query: str = Query(min_length=1, description="Free-form query with fuzzy matching enabled"),
     limit: int = Query(default=10, ge=1, le=30),
     search_service: QuoteSearchService = Depends(get_quote_search_service),
 ) -> list[QuoteResult]:
-    return [QuoteResult(**quote) for quote in search_service.intelligent_search(query, limit=limit)]
+    quotes = await search_service.search_quotes(query, limit=limit)
+    return [QuoteResult(**quote) for quote in quotes]
 
 
 @router.get("/voice-search", response_model=list[QuoteResult])
-def voice_search(
+async def voice_search(
     query: str = Query(min_length=1, description="Voice query text"),
     limit: int = Query(default=3, ge=1, le=10),
     search_service: QuoteSearchService = Depends(get_quote_search_service),
 ) -> list[QuoteResult]:
-    return [QuoteResult(**quote) for quote in search_service.voice_search(query, limit=limit)]
+    quotes = await search_service.search_quotes(query, limit=limit)
+    return [QuoteResult(**quote) for quote in quotes]

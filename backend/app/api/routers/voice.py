@@ -17,7 +17,7 @@ async def voice_query(
     selected_user_id: str | None = Form(default=None),
     conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> VoiceQueryResponse:
-    payload = conversation_service.process_voice_query(
+    payload = await conversation_service.process_voice_query(
         audio_bytes=await audio.read(),
         filename=audio.filename or "voice.wav",
         conversation_id=conversation_id,

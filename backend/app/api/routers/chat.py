@@ -11,11 +11,11 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 @router.post("/query", response_model=ChatQueryResponse)
-def chat_query(
+async def chat_query(
     request: ChatQueryRequest,
     conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> ChatQueryResponse:
-    payload = conversation_service.process_chat_query(
+    payload = await conversation_service.process_chat_query(
         message=request.message,
         conversation_id=request.conversation_id,
         selected_user_id=request.selected_user_id,

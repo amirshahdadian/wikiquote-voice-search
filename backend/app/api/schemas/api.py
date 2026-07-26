@@ -7,9 +7,12 @@ from pydantic import BaseModel, Field
 
 
 class QuoteResult(BaseModel):
+    quote_id: str
     quote_text: str
-    author_name: str
-    source_title: str
+    author_name: Optional[str] = None
+    source_title: Optional[str] = None
+    page_title: str
+    citation: Optional[str] = None
     relevance_score: Optional[float] = None
     search_type: Optional[str] = None
     match_position: Optional[str] = None

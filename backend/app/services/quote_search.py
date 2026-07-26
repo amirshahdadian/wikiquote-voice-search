@@ -1,29 +1,54 @@
-"""Quote search service backed by Neo4j."""
+"""Public quote-search service."""
 from __future__ import annotations
 
-from backend.app.core.settings import Settings
-from backend.app.integrations.neo4j_quotes import QuoteSearchService as Neo4jQuoteSearch
+from typing import Any
+
+from backend.app.domain import QuoteHit, SearchIntent
 
 
 class QuoteSearchService:
-    """High-level quote search service used by HTTP handlers and workflows."""
+    def __init__(self, repository: Any, hybrid_search: Any):
+        self.repository = repository
+        self.hybrid_search = hybrid_search
 
-    def __init__(self, app_settings: Settings):
-        self._repository = Neo4jQuoteSearch(
-            app_settings.neo4j_uri,
-            app_settings.neo4j_username,
-            app_settings.neo4j_password,
+    async def search_quotes(
+        self, query: str, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        hits = await self.hybrid_search.search(
+            SearchIntent(kind="topic", search_text=query, limit=limit)
         )
-        self._repository.connect()
-        self._repository.build_semantic_index(sample_size=10000)
+        return [self._serialize(hit) for hit in hits]
 
-    @property
-    def repository(self) -> Neo4jQuoteSearch:
-        return self._repository
+    async def search_by_theme(
+        self, theme: str, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        return await self.search_quotes(theme, limit)
+
+    def autocomplete(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        return [
+            self._serialize(hit)
+            for hit in self.repository.autocomplete(query, limit)
+        ]
+
+    def get_random_quote(self) -> dict[str, Any] | None:
+        hit = self.repository.random_quote()
+        return self._serialize(hit) if hit else None
+
+    def get_popular_authors(self, limit: int = 20) -> list[dict[str, Any]]:
+        return self.repository.popular_authors(limit)
 
     def close(self) -> None:
-        self._repository.close()
+        self.repository.close()
 
-    def __getattr__(self, name: str):
-        return getattr(self._repository, name)
-
+    @staticmethod
+    def _serialize(hit: QuoteHit) -> dict[str, Any]:
+        return {
+            "quote_id": hit.quote_id,
+            "quote_text": hit.quote_text,
+            "author_name": hit.author_name,
+            "source_title": hit.work_title,
+            "page_title": hit.page_title,
+            "citation": hit.citation,
+            "relevance_score": hit.score,
+            "search_type": hit.search_type,
+        }

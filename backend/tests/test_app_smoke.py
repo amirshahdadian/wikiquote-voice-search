@@ -9,33 +9,39 @@ from backend.app.main import create_app
 
 
 class StubQuoteSearch:
-    def search_quotes(self, query: str, limit: int = 5):
+    async def search_quotes(self, query: str, limit: int = 5):
         return [
             {
+                "quote_id": "quote-1",
                 "quote_text": f"Quote about {query}",
                 "author_name": "Test Author",
                 "source_title": "Test Source",
+                "page_title": "Test Author",
+                "citation": None,
             }
         ][:limit]
 
     def get_random_quote(self):
         return {
+            "quote_id": "quote-random",
             "quote_text": "Random quote",
             "author_name": "Test Author",
             "source_title": "Test Source",
+            "page_title": "Test Author",
+            "citation": None,
         }
 
-    def search_by_theme(self, theme: str, limit: int = 10):
-        return self.search_quotes(theme, limit)
+    async def search_by_theme(self, theme: str, limit: int = 10):
+        return await self.search_quotes(theme, limit)
 
     def autocomplete(self, query: str, limit: int = 5):
         return self.search_quotes(query, limit)
 
-    def intelligent_search(self, query: str, limit: int = 10):
-        return self.search_quotes(query, limit)
+    async def intelligent_search(self, query: str, limit: int = 10):
+        return await self.search_quotes(query, limit)
 
-    def voice_search(self, query: str, limit: int = 3):
-        return self.search_quotes(query, limit)
+    async def voice_search(self, query: str, limit: int = 3):
+        return await self.search_quotes(query, limit)
 
     def get_popular_authors(self, limit: int = 20):
         return [{"author_name": "Test Author", "quote_count": 1}]
@@ -70,7 +76,7 @@ class StubVoice:
 
 
 class StubConversation:
-    def process_chat_query(self, message: str, conversation_id: str | None = None, selected_user_id: str | None = None):
+    async def process_chat_query(self, message: str, conversation_id: str | None = None, selected_user_id: str | None = None):
         return {
             "conversation_id": conversation_id or "stub-conversation",
             "recognized_user": None,
