@@ -29,9 +29,16 @@ def reciprocal_rank_fusion(
 
 
 class HybridSearch:
-    def __init__(self, repository: Any, gemini: GeminiService):
+    def __init__(
+        self,
+        repository: Any,
+        gemini: GeminiService,
+        *,
+        semantic_ready: bool = True,
+    ):
         self.repository = repository
         self.gemini = gemini
+        self.semantic_ready = semantic_ready
 
     async def search_text(self, query: str, limit: int = 5) -> list[QuoteHit]:
         return await self.search(
@@ -53,7 +60,7 @@ class HybridSearch:
         lexical = await asyncio.to_thread(
             self.repository.lexical_search, intent.search_text, max(intent.limit, 20)
         )
-        if intent.kind != "topic":
+        if intent.kind != "topic" or not self.semantic_ready:
             return lexical[: intent.limit]
 
         try:

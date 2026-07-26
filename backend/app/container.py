@@ -33,7 +33,14 @@ class AppContainer:
             app_settings.neo4j_username,
             app_settings.neo4j_password,
         )
-        self.search = HybridSearch(self.repository, gemini_service)
+        self.search = HybridSearch(
+            self.repository,
+            gemini_service,
+            semantic_ready=self.repository.embeddings_ready(
+                app_settings.gemini_embedding_model,
+                app_settings.gemini_embedding_dimensions,
+            ),
+        )
         workflow = build_query_workflow(gemini_service, self.search)
 
         speaker_service = SpeakerIdentificationService(threshold=0.75)

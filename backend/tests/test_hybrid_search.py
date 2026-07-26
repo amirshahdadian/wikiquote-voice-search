@@ -97,6 +97,20 @@ def test_embedding_failure_returns_lexical_results():
     assert repository.calls == ["lexical"]
 
 
+def test_incomplete_document_embeddings_disable_semantic_search():
+    repository = FakeRepository()
+    gemini = FakeGemini()
+    search = HybridSearch(repository, gemini, semantic_ready=False)
+
+    results = asyncio.run(
+        search.search(SearchIntent(kind="topic", search_text="courage"))
+    )
+
+    assert results[0].search_type == "lexical"
+    assert repository.calls == ["lexical"]
+    assert gemini.calls == 0
+
+
 def test_quote_fragment_stays_lexical_only():
     repository = FakeRepository()
     gemini = FakeGemini()

@@ -193,6 +193,26 @@ class Neo4jQuoteRepository:
         except Exception:
             return False
 
+    def embeddings_ready(self, model: str, dimensions: int) -> bool:
+        with self.driver.session() as session:
+            record = session.run(
+                """
+                MATCH (q:Quote)
+                RETURN count(q) > 0
+                   AND count(
+                     CASE
+                       WHEN q.embedding IS NOT NULL
+                        AND q.embedding_model = $model
+                        AND q.embedding_dimensions = $dimensions
+                       THEN 1
+                     END
+                   ) = count(q) AS ready
+                """,
+                model=model,
+                dimensions=dimensions,
+            ).single()
+        return bool(record and record["ready"])
+
     def load(self, rows: Iterable[dict[str, Any]], batch_size: int = 1000) -> None:
         batch: list[dict[str, Any]] = []
         for row in rows:
