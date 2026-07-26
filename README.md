@@ -79,7 +79,7 @@ personal data in prompts.
 
 - Python 3.11 or newer
 - Node.js 20 or newer
-- Neo4j 5.26 or newer
+- Neo4j 2026.01 or newer
 - a Gemini API key for intent classification and embeddings
 - the English Wikiquote pages and articles XML dump
 

@@ -76,8 +76,12 @@ LIMIT $limit
 
 _VECTOR_QUERY = (
     """
-CALL db.index.vector.queryNodes('quote_embedding', $candidate_limit, $embedding)
-YIELD node AS q, score
+MATCH (q:Quote)
+  SEARCH q IN (
+    VECTOR INDEX quote_embedding
+    FOR $embedding
+    LIMIT $candidate_limit
+  ) SCORE AS score
 """
     + _ATTRIBUTION_SUBQUERY
     + """

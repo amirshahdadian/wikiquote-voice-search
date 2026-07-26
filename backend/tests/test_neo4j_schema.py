@@ -157,7 +157,9 @@ def test_runtime_search_uses_only_fixed_semantic_index_queries():
         query for query, _ in driver.session_instance.calls
     ]
     assert "db.index.fulltext.queryNodes('quote_text'" in lexical
-    assert "db.index.vector.queryNodes('quote_embedding'" in vector
+    assert "VECTOR INDEX quote_embedding" in vector
+    assert "SCORE AS score" in vector
+    assert "db.index.vector.queryNodes" not in vector
     assert "db.index.fulltext.queryNodes('author_name'" in author
     assert "db.index.fulltext.queryNodes('quote_text'" in autocomplete
     assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, author, autocomplete))
