@@ -3,19 +3,19 @@ from __future__ import annotations
 
 import hashlib
 import html
-import json
 import logging
 import re
 import unicodedata
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
 
 import mwparserfromhell
 
 from backend.app.core.logging import configure_logging
 from backend.app.core.settings import settings
+from backend.app.integrations.neo4j_repository import Neo4jQuoteRepository
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +71,6 @@ class ExtractedQuote:
     def to_dict(self) -> dict[str, Any]:
         return {key: value for key, value in asdict(self).items() if value is not None}
 
-    def to_neo4j_dict(self) -> dict[str, Any]:
-        return self.to_dict()
-
-
 @dataclass(frozen=True, slots=True)
 class PageMetadata:
     title: str
@@ -97,11 +93,6 @@ class MWParserQuoteExtractor:
         self.seen_attributions: set[str] = set()
         self.processed_pages = 0
         self.total_quotes = 0
-        self.duplicate_stats = {
-            "total_found": 0,
-            "duplicates_removed": 0,
-            "unique_kept": 0,
-        }
         self.min_length = settings.quote_min_length
         self.max_length = settings.quote_max_length
         self.min_words = settings.quote_min_words
@@ -129,20 +120,16 @@ class MWParserQuoteExtractor:
             raw_quote.page_id = page_id
             raw_quote.revision_id = revision_id
             quote = self._finalize_quote(raw_quote)
-            self.duplicate_stats["total_found"] += 1
             if quote.attribution_id in self.seen_attributions:
-                self.duplicate_stats["duplicates_removed"] += 1
                 continue
             self.seen_attributions.add(quote.attribution_id)
-            self.duplicate_stats["unique_kept"] += 1
             rows.append(quote)
         self.total_quotes += len(rows)
         return rows
 
-    def parse_wikiquote_xml(
+    def iter_wikiquote_xml(
         self, xml_file_path: str, limit: int | None = None
-    ) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
+    ) -> Iterator[dict[str, Any]]:
         for _, element in ET.iterparse(xml_file_path, events=("end",)):
             if self._local_name(element.tag) != "page":
                 continue
@@ -155,22 +142,11 @@ class MWParserQuoteExtractor:
             text = self._child_text(revision, "text") if revision is not None else ""
             if title and page_id is not None and revision_id is not None:
                 extracted = self.extract_page(title, page_id, revision_id, text)
-                rows.extend(item.to_dict() for item in extracted)
+                yield from (item.to_dict() for item in extracted)
                 self.processed_pages += 1
             element.clear()
             if limit is not None and self.processed_pages >= limit:
                 break
-        return rows
-
-    def _extract_quotes_from_page(
-        self, wikitext: str, page_title: str
-    ) -> list[ExtractedQuote]:
-        metadata = self._classify_page(page_title, wikitext)
-        return [
-            *self._extract_templates(wikitext, metadata),
-            *self._extract_blockquotes(wikitext, metadata),
-            *self._extract_bullets(wikitext, metadata),
-        ]
 
     def _extract_templates(
         self, wikitext: str, metadata: PageMetadata
@@ -497,26 +473,28 @@ class MWParserQuoteExtractor:
         value = cls._child_text(element, name)
         return int(value) if value.strip().isdigit() else None
 
-    @staticmethod
-    def save_quotes_to_json(quotes: list[dict[str, Any]], output_file: str) -> None:
-        path = Path(output_file)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(quotes, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-
-
 def main() -> None:
     configure_logging(settings.log_level)
     extractor = MWParserQuoteExtractor()
-    quotes = extractor.parse_wikiquote_xml(
-        str(settings.xml_file), limit=settings.parse_page_limit
+    repository = Neo4jQuoteRepository(
+        settings.neo4j_uri,
+        settings.neo4j_username,
+        settings.neo4j_password,
     )
-    extractor.save_quotes_to_json(quotes, str(settings.resolved_quotes_file))
+    try:
+        repository.ensure_schema()
+        repository.load(
+            extractor.iter_wikiquote_xml(
+                str(settings.xml_file),
+                limit=settings.parse_page_limit,
+            ),
+            batch_size=settings.batch_size,
+        )
+    finally:
+        repository.close()
     logger.info(
         "Extracted %d quotations from %d pages",
-        len(quotes),
+        extractor.total_quotes,
         extractor.processed_pages,
     )
 

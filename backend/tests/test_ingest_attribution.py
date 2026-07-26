@@ -82,10 +82,19 @@ def test_page_and_revision_ids_are_preserved(tmp_path):
         encoding="utf-8",
     )
 
-    rows = MWParserQuoteExtractor().parse_wikiquote_xml(str(xml_path))
+    rows = list(MWParserQuoteExtractor().iter_wikiquote_xml(str(xml_path)))
 
     assert rows[0]["page_id"] == 42
     assert rows[0]["revision_id"] == 84
+
+
+def test_xml_extraction_returns_an_iterator(tmp_path):
+    xml_path = tmp_path / "empty.xml"
+    xml_path.write_text("<mediawiki />", encoding="utf-8")
+
+    rows = MWParserQuoteExtractor().iter_wikiquote_xml(str(xml_path))
+
+    assert iter(rows) is rows
 
 
 def test_validation_is_deliberately_small():

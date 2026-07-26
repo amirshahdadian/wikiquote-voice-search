@@ -138,11 +138,10 @@ def test_maintenance_cli_has_explicit_graph_commands():
     parser = build_parser()
 
     assert parser.parse_args(["schema"]).command == "schema"
-    assert parser.parse_args(["load"]).command == "load"
     assert parser.parse_args(["embed"]).command == "embed"
     assert parser.parse_args(["verify"]).command == "verify"
     with pytest.raises(SystemExit):
-        parser.parse_args(["load", "--allow-legacy-database"])
+        parser.parse_args(["load"])
 
 
 def test_runtime_search_uses_only_fixed_semantic_index_queries():

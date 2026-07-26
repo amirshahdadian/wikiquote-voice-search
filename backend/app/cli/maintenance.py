@@ -4,7 +4,6 @@ import argparse
 from datetime import datetime, timezone
 import json
 import logging
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -23,19 +22,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Maintain the Wikiquote graph")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("schema", help="Create constraints and search indexes")
-    commands.add_parser("load", help="Load extracted quotes")
     commands.add_parser("embed", help="Submit or import a Gemini embedding batch")
     commands.add_parser("verify", help="Print graph node counts")
     return parser
-
-
-def load_rows(path: Path) -> Iterable[dict[str, Any]]:
-    with path.open(encoding="utf-8") as handle:
-        rows = json.load(handle)
-    if not isinstance(rows, list):
-        raise ValueError("Extracted quotes file must contain a JSON array")
-    yield from rows
-
 
 def create_repository(app_settings: Settings) -> Neo4jQuoteRepository:
     return Neo4jQuoteRepository(
@@ -126,13 +115,6 @@ def run_command(
     try:
         if args.command == "schema":
             graph.ensure_schema()
-            return None
-        if args.command == "load":
-            graph.ensure_schema()
-            graph.load(
-                load_rows(app_settings.resolved_quotes_file),
-                batch_size=app_settings.batch_size,
-            )
             return None
         if args.command == "verify":
             return graph.verify_counts(

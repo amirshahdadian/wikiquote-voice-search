@@ -41,11 +41,9 @@ fusion. Author and fragment searches use fixed Cypher queries. Autocomplete is
 lexical only, so typing does not make Gemini calls. If Gemini is unavailable,
 topic search still returns full-text results.
 
-LangGraph holds conversation state and runs three nodes: `interpret`,
-`retrieve`, and `respond`. It is a bounded workflow, not an autonomous agent.
-It cannot choose tools, create new steps, or execute model output. Its local
-state store keeps one bounded state for at most 1,000 recently used
-conversation threads.
+One bounded workflow interprets, retrieves, and responds. It cannot choose
+tools, create steps, or execute model output. Its local state store keeps one
+state for at most 1,000 recently used conversation threads.
 
 Voice transcripts enter this same workflow unchanged. There is no separate
 list of filler words, command patterns, or hand-written voice search parser.
@@ -121,23 +119,20 @@ embeddings, or full quotation text.
 
 ## Build the graph
 
-Use an empty Neo4j database. The loader refuses a database containing legacy
-`QuoteOccurrence`, `Source`, `PrimaryQuote`, or `SecondaryQuote` labels.
+Use an empty Neo4j database. Ingestion creates the schema and streams extracted
+rows from the XML dump directly into Neo4j in batches.
 
 ```bash
 python -m backend.app.cli.ingest
-python -m backend.app.cli.maintenance schema
-python -m backend.app.cli.maintenance load
 python -m backend.app.cli.maintenance embed
 python -m backend.app.cli.maintenance verify
 ```
 
-The four maintenance commands are:
+The maintenance commands are:
 
 - `schema`: create constraints plus full-text and vector indexes;
-- `load`: import `data/extracted_quotes.json`;
 - `embed`: submit, poll, or import one resumable Gemini batch;
-- `verify`: print current, legacy, and stale embedding counts.
+- `verify`: print current graph and stale embedding counts.
 
 The `embed` command stores only the batch job name and model metadata under
 `artifacts/embeddings/current-job.json`. Run the same command again to poll a
@@ -148,14 +143,12 @@ For a small validation load:
 
 ```bash
 PARSE_PAGE_LIMIT=5000 python -m backend.app.cli.ingest
-python -m backend.app.cli.maintenance schema
-python -m backend.app.cli.maintenance load
 python -m backend.app.cli.maintenance embed
 ```
 
 After import, `verify` should report nonzero counts for `Quote`,
-`Attribution`, `Author`, `Work`, and `WikiquotePage`. Legacy label counts and
-`quotes_without_current_embedding` should all be zero.
+`Attribution`, `Author`, `Work`, and `WikiquotePage`.
+`quotes_without_current_embedding` should be zero after embedding.
 
 ## Run
 

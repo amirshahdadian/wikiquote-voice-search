@@ -40,7 +40,6 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     artifacts_dir: Path = Path("artifacts")
     db_path: Path | None = None
-    quotes_file: Path | None = None
     xml_file: Path = Path("enwikiquote-20250601-pages-articles.xml")
 
     quote_min_length: int = 15
@@ -61,10 +60,6 @@ class Settings(BaseSettings):
     @property
     def resolved_db_path(self) -> Path:
         return (self.db_path or (self.data_dir / "wikiquote_voice.db")).expanduser()
-
-    @property
-    def resolved_quotes_file(self) -> Path:
-        return (self.quotes_file or (self.data_dir / "extracted_quotes.json")).expanduser()
 
     @property
     def generated_audio_dir(self) -> Path:

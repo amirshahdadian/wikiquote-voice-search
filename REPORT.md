@@ -14,9 +14,9 @@ with display fields, and its search logic had become hard to explain or test.
 
 The current design separates quotations from attribution claims. It uses
 Neo4j full-text and vector indexes for retrieval, Gemini for typed intent
-classification and embeddings, and a three-step LangGraph workflow for
-conversation state. The model does not write quotes, generate Cypher, or decide
-which tools to run.
+classification and embeddings, and a small bounded workflow for conversation
+state. The model does not write quotes, generate Cypher, or decide which tools
+to run.
 
 ## 1. Assignment requirements
 
@@ -98,19 +98,17 @@ Neo4j constraints make the IDs and entity keys unique. Two full-text indexes
 cover quote text and author names. The vector index uses cosine similarity and
 768 dimensions.
 
-The maintenance CLI has four explicit commands:
+Ingestion creates the schema and streams extracted rows from the XML dump
+directly into Neo4j. The maintenance CLI keeps three explicit commands:
 
 ```bash
 python -m backend.app.cli.maintenance schema
-python -m backend.app.cli.maintenance load
 python -m backend.app.cli.maintenance embed
 python -m backend.app.cli.maintenance verify
 ```
 
-The loader refuses an old database unless the operator supplies the legacy
-override. In normal use the new schema is built in an empty database. The
-verification command reports current node counts, legacy label counts, and
-quotes with missing or stale embeddings.
+The verification command reports current node counts and quotes with missing
+or stale embeddings.
 
 ## 4. Embeddings
 
@@ -156,16 +154,11 @@ Gemini outage.
 
 ## 6. Conversation workflow
 
-LangGraph runs three nodes:
-
-1. `interpret` asks Gemini for a `SearchIntent` schema;
-2. `retrieve` calls the fixed hybrid search service;
-3. `respond` formats a short response from retrieved fields.
-
-The graph uses a small in-memory state store keyed by conversation ID. Repeat,
-alternative, and attribution follow-ups reuse the latest result. Each thread
-stores one final state with eight history messages, and a least-recently-used
-cap keeps no more than 1,000 threads in process memory.
+The workflow asks Gemini for a typed `SearchIntent`, calls fixed retrieval, and
+formats a short response from retrieved fields. Its small in-memory state store
+is keyed by conversation ID. Repeat, alternative, and attribution follow-ups
+reuse the latest result. Each thread stores eight history messages, and a
+least-recently-used cap keeps no more than 1,000 threads in process memory.
 
 This is orchestration, not an autonomous agent. There is no planner loop, tool
 catalog, generated query language, or open-ended model response. A more
