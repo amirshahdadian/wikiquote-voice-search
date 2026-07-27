@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
-import tempfile
-from typing import Any
 import pickle
+import tempfile
+import urllib.request
+import uuid
 import warnings
 from pathlib import Path
+from typing import Any
+
 import numpy as np
-import urllib.request
 import soundfile as sf
-from backend.users import get_tts_preferences
-import importlib.util
-import uuid
+
 from backend.config import Settings
+from backend.users import get_tts_preferences
 
 
 # Asr
@@ -28,24 +30,8 @@ _INITIAL_PROMPT = (
 
 
 class ASRService:
-    def __init__(
-        self,
-        model_name: str = DEFAULT_MODEL,
-        device: str = "auto",
-        backend: str = "mlx",
-    ):
+    def __init__(self, model_name: str = DEFAULT_MODEL):
         self.model_name = model_name
-        self._model_loaded = False
-
-    def load_model(self) -> None:
-        if self._model_loaded:
-            return
-        try:
-            import mlx_whisper  # noqa: F401
-        except ImportError:
-            logger.error("mlx-whisper is not installed")
-            raise
-        self._model_loaded = True
 
     def transcribe(
         self,
@@ -69,7 +55,6 @@ class ASRService:
             **options,
         )
         text = result["text"].strip()
-        self._model_loaded = True
         logger.info("Transcription completed")
         return {
             "text": text,
@@ -78,24 +63,8 @@ class ASRService:
             "segments": result.get("segments", []),
         }
 
-    def transcribe_bytes(
-        self,
-        audio_bytes: bytes,
-        language: str | None = None,
-    ) -> dict[str, Any]:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-            temp_file.write(audio_bytes)
-            path = temp_file.name
-        try:
-            return self.transcribe(path, language=language)
-        finally:
-            if os.path.exists(path):
-                os.remove(path)
-
 
 # Speaker Id
-
-logger = logging.getLogger(__name__)
 
 warnings.filterwarnings(
     "ignore",
@@ -115,7 +84,7 @@ warnings.filterwarnings(
 
 
 class SpeakerIdentificationService:
-    def __init__(self, threshold: float = 0.75, device: str = "cpu"):
+    def __init__(self, threshold: float = 0.75):
         self.threshold = threshold
         self._encoder = None
 
@@ -149,7 +118,6 @@ class SpeakerIdentificationService:
 
     def enroll_speaker(
         self,
-        user_id: str,
         audio_files: list[str],
     ) -> np.ndarray:
         if not audio_files:
@@ -228,8 +196,6 @@ class SpeakerIdentificationService:
 
 
 # Tts
-
-logger = logging.getLogger(__name__)
 
 KOKORO_VOICES = [
     "af_heart",
@@ -355,26 +321,14 @@ class VoiceService:
         tts_service: TTSService | None = None,
     ):
         self.settings = app_settings
-        self._speaker_service = speaker_service or SpeakerIdentificationService(threshold=0.75)
-        self._asr_service = asr_service
-        self._tts_service = tts_service
+        self.speaker_service = speaker_service or SpeakerIdentificationService(
+            threshold=0.75
+        )
+        self.asr_service = asr_service or ASRService()
+        self.tts_service = tts_service or TTSService(
+            db_path=str(self.settings.resolved_db_path)
+        )
         self.settings.generated_audio_dir.mkdir(parents=True, exist_ok=True)
-
-    @property
-    def speaker_service(self) -> SpeakerIdentificationService:
-        return self._speaker_service
-
-    @property
-    def asr_service(self) -> ASRService:
-        if self._asr_service is None:
-            self._asr_service = ASRService()
-        return self._asr_service
-
-    @property
-    def tts_service(self) -> TTSService:
-        if self._tts_service is None:
-            self._tts_service = TTSService(db_path=str(self.settings.resolved_db_path))
-        return self._tts_service
 
     def health_flags(self, search_ready: bool) -> dict[str, bool]:
         return {
@@ -420,7 +374,7 @@ class VoiceService:
                 output_path=str(primary_path),
                 preferences=preferences,
             )
-            return self.audio_url_for(primary_filename), []
+            return f"/api/audio/{primary_filename}", []
         except Exception:
             return None, ["tts_unavailable"]
 
@@ -432,23 +386,9 @@ class VoiceService:
             return None
         return candidate if candidate.exists() else None
 
-    def create_tts_preview(
-        self,
-        text: str,
-        user_id: str | None = None,
-        preferences: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        audio_url, warnings = self.synthesize_audio(text=text, user_id=user_id, preferences=preferences)
-        return {"audio_url": audio_url, "warnings": warnings}
-
-    def audio_url_for(self, audio_id: str) -> str:
-        return f"{self.settings.api_prefix}/audio/{audio_id}"
-
     @staticmethod
     def write_temp_file(filename: str, payload: bytes) -> str:
         suffix = Path(filename or "sample.wav").suffix or ".wav"
-        import tempfile
-
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             temp_file.write(payload)
             return temp_file.name

@@ -38,8 +38,8 @@ def test_profile_and_preferences_round_trip(tmp_path):
     database = tmp_path / "users.db"
     initialize_database(database)
 
-    assert save_user_profile("ada", "Ada", "group-a", database)
-    assert save_tts_preferences(
+    save_user_profile("ada", "Ada", "group-a", database)
+    save_tts_preferences(
         "ada",
         {
             "speaking_rate": 0.9,
@@ -54,6 +54,6 @@ def test_profile_and_preferences_round_trip(tmp_path):
     assert "pitch_scale" not in get_tts_preferences("ada", database)
     assert [row["user_id"] for row in list_user_profiles(database)] == ["ada"]
 
-    assert delete_tts_preferences("ada", database)
-    assert delete_user_profile("ada", database)
+    delete_tts_preferences("ada", database)
+    delete_user_profile("ada", database)
     assert get_user_profile("ada", database) is None

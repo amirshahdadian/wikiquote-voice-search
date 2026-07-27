@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from typing import Literal, TypedDict
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, ConfigDict, Field
 
 # Domain
 
@@ -39,8 +37,6 @@ class QuoteHit(BaseModel):
 
 
 class QueryState(TypedDict, total=False):
-    message: str
-    conversation_id: str
     intent: SearchIntent
     hits: list[QuoteHit]
     result_index: int
@@ -51,9 +47,6 @@ class QueryState(TypedDict, total=False):
 
 # Api
 
-QuoteResult = QuoteHit
-
-
 class UserPreferences(BaseModel):
     speaking_rate: float = Field(default=1.0, ge=0.5, le=1.5)
     energy_scale: float = Field(default=1.0, ge=0.5, le=1.5)
@@ -63,15 +56,15 @@ class UserPreferences(BaseModel):
 class UserProfile(BaseModel):
     user_id: str
     display_name: str
-    group_identifier: Optional[str] = None
+    group_identifier: str | None = None
     has_embedding: bool = False
-    preferences: Optional[UserPreferences] = None
+    preferences: UserPreferences | None = None
 
 
 class RecognizedUser(BaseModel):
     user_id: str
     display_name: str
-    confidence: Optional[float] = None
+    confidence: float | None = None
     source: str
 
 
@@ -85,18 +78,18 @@ class HealthResponse(BaseModel):
 
 class ChatQueryRequest(BaseModel):
     message: str = Field(min_length=1)
-    conversation_id: Optional[str] = None
-    selected_user_id: Optional[str] = None
+    conversation_id: str | None = None
+    selected_user_id: str | None = None
 
 
 class ChatQueryResponse(BaseModel):
     conversation_id: str
-    recognized_user: Optional[RecognizedUser] = None
+    recognized_user: RecognizedUser | None = None
     intent_type: str
     response_text: str
-    best_quote: Optional[QuoteResult] = None
-    related_quotes: list[QuoteResult] = Field(default_factory=list)
-    audio_url: Optional[str] = None
+    best_quote: QuoteHit | None = None
+    related_quotes: list[QuoteHit] = Field(default_factory=list)
+    audio_url: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -106,10 +99,10 @@ class VoiceQueryResponse(ChatQueryResponse):
 
 class TTSPreviewRequest(BaseModel):
     text: str = Field(min_length=1)
-    user_id: Optional[str] = None
-    preferences: Optional[UserPreferences] = None
+    user_id: str | None = None
+    preferences: UserPreferences | None = None
 
 
 class TTSPreviewResponse(BaseModel):
-    audio_url: Optional[str] = None
+    audio_url: str | None = None
     warnings: list[str] = Field(default_factory=list)

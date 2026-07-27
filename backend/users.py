@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import logging
-import sqlite3
-from pathlib import Path
-from typing import Any
-from backend.config import settings
 import os
 import random
 import re
+import sqlite3
 import tempfile
-from backend.config import Settings
+from pathlib import Path
+from typing import Any
+
+from backend.config import Settings, settings
 
 
 # Sqlite Users
 
-logger = logging.getLogger(__name__)
 DEFAULT_DB_PATH = settings.resolved_db_path
 
 _SCHEMA = """
@@ -57,139 +55,105 @@ def save_user_profile(
     display_name: str,
     group_identifier: str | None = None,
     db_path: Path | None = None,
-) -> bool:
-    try:
-        with get_connection(db_path) as connection:
-            connection.execute(
-                """
-                INSERT INTO user_profiles (
-                    user_id, display_name, group_identifier
-                ) VALUES (?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    display_name = excluded.display_name,
-                    group_identifier = excluded.group_identifier,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (user_id, display_name, group_identifier),
-            )
-        return True
-    except sqlite3.Error:
-        logger.exception("Could not save user profile")
-        return False
+) -> None:
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO user_profiles (
+                user_id, display_name, group_identifier
+            ) VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                group_identifier = excluded.group_identifier,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, display_name, group_identifier),
+        )
 
 
 def get_user_profile(
     user_id: str, db_path: Path | None = None
 ) -> dict[str, Any] | None:
-    try:
-        with get_connection(db_path) as connection:
-            row = connection.execute(
-                """
-                SELECT user_id, display_name, group_identifier,
-                       created_at, updated_at
-                FROM user_profiles
-                WHERE user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-        return dict(row) if row else None
-    except sqlite3.Error:
-        logger.exception("Could not load user profile")
-        return None
+    with get_connection(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT user_id, display_name, group_identifier,
+                   created_at, updated_at
+            FROM user_profiles
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def list_user_profiles(db_path: Path | None = None) -> list[dict[str, Any]]:
-    try:
-        with get_connection(db_path) as connection:
-            rows = connection.execute(
-                """
-                SELECT user_id, display_name, group_identifier,
-                       created_at, updated_at
-                FROM user_profiles
-                ORDER BY display_name COLLATE NOCASE
-                """
-            ).fetchall()
-        return [dict(row) for row in rows]
-    except sqlite3.Error:
-        logger.exception("Could not list user profiles")
-        return []
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT user_id, display_name, group_identifier,
+                   created_at, updated_at
+            FROM user_profiles
+            ORDER BY display_name COLLATE NOCASE
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
-def delete_user_profile(user_id: str, db_path: Path | None = None) -> bool:
-    try:
-        with get_connection(db_path) as connection:
-            connection.execute(
-                "DELETE FROM user_profiles WHERE user_id = ?", (user_id,)
-            )
-        return True
-    except sqlite3.Error:
-        logger.exception("Could not delete user profile")
-        return False
+def delete_user_profile(user_id: str, db_path: Path | None = None) -> None:
+    with get_connection(db_path) as connection:
+        connection.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
 
 
 def save_tts_preferences(
     user_id: str,
     preferences: dict[str, Any],
     db_path: Path | None = None,
-) -> bool:
-    try:
-        with get_connection(db_path) as connection:
-            connection.execute(
-                """
-                INSERT INTO user_tts_preferences (
-                    user_id, speaking_rate, energy_scale, style
-                ) VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    speaking_rate = excluded.speaking_rate,
-                    energy_scale = excluded.energy_scale,
-                    style = excluded.style,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    user_id,
-                    preferences.get("speaking_rate", 1.0),
-                    preferences.get("energy_scale", 1.0),
-                    preferences.get("style", "neutral"),
-                ),
-            )
-        return True
-    except sqlite3.Error:
-        logger.exception("Could not save TTS preferences")
-        return False
+) -> None:
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO user_tts_preferences (
+                user_id, speaking_rate, energy_scale, style
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                speaking_rate = excluded.speaking_rate,
+                energy_scale = excluded.energy_scale,
+                style = excluded.style,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                user_id,
+                preferences.get("speaking_rate", 1.0),
+                preferences.get("energy_scale", 1.0),
+                preferences.get("style", "neutral"),
+            ),
+        )
 
 
 def get_tts_preferences(
     user_id: str, db_path: Path | None = None
 ) -> dict[str, Any] | None:
-    try:
-        with get_connection(db_path) as connection:
-            row = connection.execute(
-                """
-                SELECT speaking_rate, energy_scale, style
-                FROM user_tts_preferences
-                WHERE user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-        return dict(row) if row else None
-    except sqlite3.Error:
-        logger.exception("Could not load TTS preferences")
-        return None
+    with get_connection(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT speaking_rate, energy_scale, style
+            FROM user_tts_preferences
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def delete_tts_preferences(
     user_id: str, db_path: Path | None = None
-) -> bool:
-    try:
-        with get_connection(db_path) as connection:
-            connection.execute(
-                "DELETE FROM user_tts_preferences WHERE user_id = ?",
-                (user_id,),
-            )
-        return True
-    except sqlite3.Error:
-        logger.exception("Could not delete TTS preferences")
-        return False
+) -> None:
+    with get_connection(db_path) as connection:
+        connection.execute(
+            "DELETE FROM user_tts_preferences WHERE user_id = ?",
+            (user_id,),
+        )
 
 
 # Users
@@ -233,7 +197,7 @@ class UserService:
         preferences["style"] = self._assign_unique_voice()
         sample_paths = self._materialize_uploads(audio_samples)
         try:
-            embedding = self.speaker_service.enroll_speaker(user_id, sample_paths)
+            embedding = self.speaker_service.enroll_speaker(sample_paths)
             self.speaker_service.save_embedding(
                 embedding,
                 str(self.settings.embeddings_dir / f"{user_id}.pkl"),
@@ -257,7 +221,7 @@ class UserService:
 
         sample_paths = self._materialize_uploads(audio_samples)
         try:
-            embedding = self.speaker_service.enroll_speaker(user_id, sample_paths)
+            embedding = self.speaker_service.enroll_speaker(sample_paths)
             self.speaker_service.save_embedding(
                 embedding,
                 str(self.settings.embeddings_dir / f"{user_id}.pkl"),

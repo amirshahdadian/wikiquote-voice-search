@@ -1,7 +1,7 @@
 import asyncio
 
 from backend.models import QuoteHit, SearchIntent
-from backend.search import build_query_workflow
+from backend.search import QueryWorkflow
 
 
 class FakeGemini:
@@ -39,7 +39,7 @@ class FakeSearch:
 
 
 def test_topic_query_runs_interpret_retrieve_respond():
-    workflow = build_query_workflow(FakeGemini(), FakeSearch())
+    workflow = QueryWorkflow(FakeGemini(), FakeSearch())
 
     result = asyncio.run(
         workflow.run("something about courage", "c1")
@@ -53,7 +53,7 @@ def test_topic_query_runs_interpret_retrieve_respond():
 
 
 def test_attribution_followup_uses_previous_hit():
-    workflow = build_query_workflow(FakeGemini(), FakeSearch())
+    workflow = QueryWorkflow(FakeGemini(), FakeSearch())
 
     async def scenario():
         await workflow.run("something about courage", "c1")
@@ -78,7 +78,7 @@ def test_alternative_advances_without_requerying():
         return await original_search(intent)
 
     search.search = counted_search
-    workflow = build_query_workflow(FakeGemini(), search)
+    workflow = QueryWorkflow(FakeGemini(), search)
 
     async def scenario():
         await workflow.run("something about courage", "c1")
@@ -96,7 +96,7 @@ def test_empty_search_result_is_explicit():
         async def search(self, intent):
             return []
 
-    workflow = build_query_workflow(FakeGemini(), EmptySearch())
+    workflow = QueryWorkflow(FakeGemini(), EmptySearch())
 
     result = asyncio.run(
         workflow.run("something obscure", "c1")
@@ -107,7 +107,7 @@ def test_empty_search_result_is_explicit():
 
 
 def test_conversation_memory_evicts_the_oldest_conversation():
-    workflow = build_query_workflow(FakeGemini(), FakeSearch(), max_threads=2)
+    workflow = QueryWorkflow(FakeGemini(), FakeSearch(), max_threads=2)
 
     async def scenario():
         for thread_id in ("oldest", "middle", "newest"):
@@ -119,7 +119,7 @@ def test_conversation_memory_evicts_the_oldest_conversation():
 
 
 def test_one_long_conversation_keeps_only_latest_bounded_state():
-    workflow = build_query_workflow(FakeGemini(), FakeSearch(), max_threads=2)
+    workflow = QueryWorkflow(FakeGemini(), FakeSearch(), max_threads=2)
 
     async def scenario():
         for turn in range(50):

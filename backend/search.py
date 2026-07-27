@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-from backend.models import QuoteHit, SearchIntent
-from backend.gemini import GeminiService, GeminiUnavailable
-from collections import OrderedDict
-from backend.models import QueryState
 import uuid
-from backend.models import QuoteHit
+from collections import OrderedDict
+from typing import Any
+
+from backend.gemini import GeminiService, GeminiUnavailable
+from backend.models import QueryState, QuoteHit, SearchIntent
 
 
 # Hybrid Search
@@ -134,8 +133,6 @@ class QueryWorkflow:
             )
 
         state: QueryState = {
-            "message": message,
-            "conversation_id": conversation_id,
             "intent": intent,
             "hits": hits,
             "result_index": result_index,
@@ -151,16 +148,6 @@ class QueryWorkflow:
         while len(self.states) > self.max_threads:
             self.states.popitem(last=False)
         return state
-
-
-def build_query_workflow(
-    gemini: Any,
-    search: Any,
-    *,
-    max_threads: int = 1000,
-) -> QueryWorkflow:
-    return QueryWorkflow(gemini, search, max_threads)
-
 
 # Conversation
 
@@ -178,7 +165,7 @@ class ConversationService:
     ) -> dict[str, Any]:
         resolved_id = conversation_id or uuid.uuid4().hex
         recognized_user, warnings = self._selected_user(selected_user_id)
-        state = await self._query(message, resolved_id)
+        state = await self.workflow.run(message, resolved_id)
         return await self._response(
             state, resolved_id, selected_user_id, recognized_user, warnings
         )
@@ -219,15 +206,12 @@ class ConversationService:
             else:
                 warnings.append("speaker_not_recognized")
 
-        state = await self._query(transcript, resolved_id)
+        state = await self.workflow.run(transcript, resolved_id)
         response = await self._response(
             state, resolved_id, selected_user_id, recognized_user, warnings
         )
         response["transcript"] = transcript
         return response
-
-    async def _query(self, message: str, conversation_id: str) -> dict[str, Any]:
-        return await self.workflow.run(message, conversation_id)
 
     async def _response(
         self,
@@ -237,7 +221,10 @@ class ConversationService:
         recognized_user: dict[str, Any] | None,
         warnings: list[str],
     ) -> dict[str, Any]:
-        hits = [self._as_hit(hit) for hit in state.get("hits", [])]
+        hits = [
+            hit if isinstance(hit, QuoteHit) else QuoteHit.model_validate(hit)
+            for hit in state.get("hits", [])
+        ]
         index = min(state.get("result_index", 0), max(len(hits) - 1, 0))
         best = hits[index] if hits else None
         related = [
@@ -266,7 +253,7 @@ class ConversationService:
             "best_quote": best.model_dump(by_alias=True) if best else None,
             "related_quotes": related,
             "audio_url": audio_url,
-            "warnings": self._dedupe([*state.get("warnings", []), *warnings]),
+            "warnings": list(dict.fromkeys([*state.get("warnings", []), *warnings])),
         }
 
     def _selected_user(
@@ -280,11 +267,3 @@ class ConversationService:
             self.user_service.load_recognized_user(user_id, 1.0, "selected"),
             [],
         )
-
-    @staticmethod
-    def _as_hit(value: QuoteHit | dict[str, Any]) -> QuoteHit:
-        return value if isinstance(value, QuoteHit) else QuoteHit.model_validate(value)
-
-    @staticmethod
-    def _dedupe(values: list[str]) -> list[str]:
-        return list(dict.fromkeys(values))

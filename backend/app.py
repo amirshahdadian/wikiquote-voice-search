@@ -1,33 +1,41 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from google import genai
 from google.genai import types
-from backend.config import Settings
-from backend.voice import SpeakerIdentificationService
+
+from backend.config import Settings, configure_logging, settings
 from backend.gemini import GeminiService
+from backend.models import (
+    ChatQueryRequest,
+    ChatQueryResponse,
+    HealthResponse,
+    QuoteHit,
+    TTSPreviewRequest,
+    TTSPreviewResponse,
+    UserPreferences,
+    UserProfile,
+    VoiceQueryResponse,
+)
 from backend.neo4j import Neo4jQuoteRepository
-from backend.search import ConversationService
+from backend.search import ConversationService, HybridSearch, QueryWorkflow
 from backend.users import UserService
-from backend.voice import VoiceService
-from backend.search import HybridSearch
-from backend.search import build_query_workflow
-from fastapi import Depends, Request
-from fastapi import APIRouter, Depends
-from backend.models import HealthResponse
-from fastapi import APIRouter, Depends, Query
-from backend.models import QuoteResult
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from backend.models import UserPreferences, UserProfile
-from backend.models import ChatQueryRequest, ChatQueryResponse
-from fastapi import APIRouter, Depends, File, Form, UploadFile
-from backend.models import TTSPreviewRequest, TTSPreviewResponse, VoiceQueryResponse
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from backend.config import configure_logging
-from backend.config import settings
+from backend.voice import SpeakerIdentificationService, VoiceService
 
 
 # Container
@@ -60,7 +68,7 @@ class AppContainer:
                 app_settings.gemini_embedding_dimensions,
             ),
         )
-        workflow = build_query_workflow(gemini_service, self.search)
+        workflow = QueryWorkflow(gemini_service, self.search)
 
         speaker_service = SpeakerIdentificationService(threshold=0.75)
         self.voice = VoiceService(app_settings, speaker_service=speaker_service)
@@ -128,21 +136,21 @@ def get_health(container: AppContainer = Depends(get_container)) -> HealthRespon
 quotes_router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 
 
-@quotes_router.get("/search", response_model=list[QuoteResult])
+@quotes_router.get("/search", response_model=list[QuoteHit])
 async def search_quotes(
     query: str = Query(min_length=1),
     limit: int = Query(default=5, ge=1, le=20),
     search_service: HybridSearch = Depends(get_search_service),
-) -> list[QuoteResult]:
+) -> list[QuoteHit]:
     return await search_service.search_text(query, limit=limit)
 
 
-@quotes_router.get("/autocomplete", response_model=list[QuoteResult])
+@quotes_router.get("/autocomplete", response_model=list[QuoteHit])
 def autocomplete(
     query: str = Query(min_length=1, description="Partial quote fragment for live suggestions"),
     limit: int = Query(default=5, ge=1, le=10),
     search_service: HybridSearch = Depends(get_search_service),
-) -> list[QuoteResult]:
+) -> list[QuoteHit]:
     return search_service.autocomplete(query, limit=limit)
 
 
@@ -261,12 +269,12 @@ def tts_preview(
     request: TTSPreviewRequest,
     voice_service: VoiceService = Depends(get_voice_service),
 ) -> TTSPreviewResponse:
-    payload = voice_service.create_tts_preview(
+    audio_url, warnings = voice_service.synthesize_audio(
         text=request.text,
         user_id=request.user_id,
         preferences=request.preferences.model_dump() if request.preferences else None,
     )
-    return TTSPreviewResponse(**payload)
+    return TTSPreviewResponse(audio_url=audio_url, warnings=warnings)
 
 
 # Audio

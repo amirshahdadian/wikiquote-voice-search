@@ -46,8 +46,8 @@ class StubVoice:
     def resolve_audio_path(self, audio_id: str):
         return None
 
-    def create_tts_preview(self, text: str, user_id: str | None = None, preferences=None):
-        return {"audio_url": None, "warnings": []}
+    def synthesize_audio(self, text: str, user_id: str | None = None, preferences=None):
+        return None, []
 
 
 class StubConversation:

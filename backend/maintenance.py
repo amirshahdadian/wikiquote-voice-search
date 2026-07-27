@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+
 from google import genai
 from google.genai import types
-from backend.config import configure_logging
-from backend.config import Settings, settings
+
+from backend.config import Settings, configure_logging, settings
 from backend.gemini import GeminiService
 from backend.neo4j import Neo4jQuoteRepository
 
@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("embed", help="Submit or import a Gemini embedding batch")
     commands.add_parser("verify", help="Print graph node counts")
     return parser
+
 
 def create_repository(app_settings: Settings) -> Neo4jQuoteRepository:
     return Neo4jQuoteRepository(

@@ -89,10 +89,7 @@ class GeminiService:
                     fallback="invalid_response",
                 )
                 return fallback
-            if isinstance(response.parsed, SearchIntent):
-                intent = response.parsed
-            else:
-                intent = SearchIntent.model_validate(response.parsed)
+            intent = response.parsed
             usage = getattr(response, "usage_metadata", None)
             log_model_event(
                 event="query",

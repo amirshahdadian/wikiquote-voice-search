@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
 from pathlib import Path
-from typing import Any
-from pydantic import Field, SecretStr, field_validator
+from typing import Literal
+
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,7 +60,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    api_prefix: str = "/api"
     frontend_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
@@ -90,15 +89,6 @@ class Settings(BaseSettings):
     quote_min_words: int = 5
     quote_max_words: int = 120
     quote_min_alpha_ratio: float = 0.5
-
-    @field_validator("frontend_origins", mode="before")
-    @classmethod
-    def _parse_frontend_origins(cls, value: Any) -> Any:
-        if value is None or value == "":
-            return ["http://localhost:3000", "http://127.0.0.1:3000"]
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
 
     @property
     def resolved_db_path(self) -> Path:
