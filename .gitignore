@@ -22,12 +22,10 @@ frontend/coverage/
 frontend/*.tsbuildinfo
 
 # Runtime and generated data
-artifacts/
 data/
 neo4j/
 enwikiquote-*.xml
 *.xml.bz2
-extracted_quotes.json
 REPORT.pdf
 
 # Local work and tools
