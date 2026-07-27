@@ -39,7 +39,92 @@ The implementation uses:
 - `kokoro-onnx` for speech synthesis;
 - FastAPI and Next.js for the application.
 
-## 2. Data extraction
+## 2. System architecture
+
+The runtime is one FastAPI process holding three services, with the model and
+the audio work sitting outside it.
+
+```mermaid
+flowchart TB
+    UI["<b>Browser</b> · Next.js<br/>typing, microphone, playback"]
+
+    ASR["mlx-whisper<br/><i>speech to text</i>"]
+    SPK["resemblyzer<br/><i>identifies the speaker</i>"]
+
+    subgraph api["FastAPI process"]
+        direction TB
+        CONV["<b>ConversationService</b><br/>resolves the user, assembles the reply"]
+        WF["<b>QueryWorkflow</b><br/>conversation state, follow-ups"]
+        SEARCH["<b>QuoteSearch</b> and repository<br/>one intent, one fixed Cypher query"]
+        CONV --> WF --> SEARCH
+    end
+
+    SQL[("SQLite<br/>profiles, voice settings")]
+    GEM["<b>Gemini 3.5 Flash-Lite</b><br/>one call per request"]
+    NEO[("<b>Neo4j</b><br/>quotations, claims, authors")]
+    TTS["kokoro-onnx<br/><i>text to speech</i>"]
+    WAV[("generated audio<br/>served by /api/audio")]
+
+    UI -->|"spoken"| ASR
+    UI -->|"spoken"| SPK
+    UI -->|"typed"| CONV
+    ASR -->|"transcript"| CONV
+    SPK -->|"user id"| CONV
+    WF -->|"request in, typed intent out"| GEM
+    SEARCH -->|"reads"| NEO
+    CONV -->|"reply text"| TTS
+    SQL -->|"which voice"| TTS
+    TTS --> WAV
+
+    classDef store fill:#eaf5ec,stroke:#3f7a55,color:#17351f
+    classDef ext fill:#fdf0e3,stroke:#b5762a,color:#5a3a12
+    classDef local fill:#e9ecfa,stroke:#5560a8,color:#22285c
+    class NEO,SQL,WAV store
+    class GEM ext
+    class ASR,SPK,TTS local
+```
+
+Building the graph is a separate pipeline that runs once, and nothing at request
+time writes to Neo4j:
+
+```mermaid
+flowchart LR
+    XML["Wikiquote XML dump"] --> ING["ingest.py"] --> NEO[("Neo4j")]
+```
+
+The container holds one Gemini client and one Neo4j driver for the life of the
+process, and closes both at shutdown. Typed and spoken requests meet at
+`ConversationService`, so the two cannot drift into separate search behaviour.
+
+A single request moves through these stages:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant API as FastAPI
+    participant V as Audio models
+    participant G as Gemini
+    participant N as Neo4j
+
+    User->>API: "wat did einstien sya about imaganation"
+    opt spoken request
+        API->>V: transcribe, then match the speaker
+        V-->>API: transcript and user id
+    end
+    API->>G: this request, plus the last two for pronouns
+    G-->>API: kind=topic, terms="imagination knowledge", author="Einstein"
+    alt points at the previous answer
+        API->>API: reuse the stored result
+    else new subject
+        API->>N: one fixed query
+        N-->>API: ranked quotations, one per speaker
+    end
+    API->>V: synthesise in the recognised user's voice
+    API-->>User: quotation, author, page, audio
+```
+
+## 3. Data extraction
 
 `backend/ingest.py` streams the XML dump with ElementTree. Page IDs are
 used while deriving stable attribution IDs, but only fields used by the graph
@@ -69,23 +154,32 @@ share one `Quote`, while separate Wikiquote claims remain separate
 A 20-page golden fixture covers person, theme, literary work, film, disputed,
 about, malformed, and duplicate cases. Four more cases use structural markers
 from current raw pages for Albert Einstein, Maya Angelou, William Shakespeare,
-and Hamlet. The extractor is 486 lines. The prior file was 2,047 lines.
+and Hamlet. The extractor is 487 lines. The prior file was 2,047 lines.
 
-## 3. Graph model
+## 4. Graph model
 
-The graph has three labels:
+```mermaid
+erDiagram
+    QUOTE ||--|{ ATTRIBUTION : "HAS_ATTRIBUTION"
+    ATTRIBUTION }o--o| AUTHOR : "ATTRIBUTED_TO"
 
-```text
-Quote
-Attribution
-Author
-```
-
-It has two relationship types:
-
-```text
-(Quote)-[:HAS_ATTRIBUTION]->(Attribution)
-(Attribution)-[:ATTRIBUTED_TO]->(Author)
+    QUOTE {
+        string id "sha256 of the normalised words"
+        string text
+        string search_text
+    }
+    ATTRIBUTION {
+        string status
+        int status_rank
+        string citation
+        string work_title
+        string page_title
+    }
+    AUTHOR {
+        string key
+        string name
+        int quote_count
+    }
 ```
 
 `Quote` contains `id`, `text`, and `search_text`. `Attribution` contains status,
@@ -111,7 +205,7 @@ python -m backend.maintenance verify
 
 It reports current node counts.
 
-## 4. The request rewrite
+## 5. The request rewrite
 
 An earlier version of this project planned to embed all of the quotations and
 fuse vector results with full-text results. That backfill was never run, so the
@@ -142,7 +236,7 @@ Removing embeddings deleted the batch submission and polling code, the vector
 index, the stored vectors, the rank fusion, the embedding settings, and the
 `embed` command: about 300 lines, and the entire per-quotation indexing cost.
 
-## 5. Retrieval
+## 6. Retrieval
 
 The runtime exposes fixed repository methods for lexical search, author-filtered
 topic search, author search, fragment search, autocomplete, and random
@@ -193,7 +287,7 @@ quotation's best claim. Author searches already hold the claim that matched the
 author, so they order and take the first with `head(collect(...))` and share a
 single result clause. Neither shape walks the attribution path twice.
 
-## 6. Conversation workflow
+## 7. Conversation workflow
 
 The workflow asks Gemini for a typed `SearchIntent`, calls fixed retrieval, and
 formats a short response from retrieved fields. Its small in-memory state store
@@ -213,7 +307,7 @@ This is orchestration, not an autonomous agent. There is no planner loop, tool
 catalog, generated query language, or open-ended model response. A more
 general agent would add cost and failure modes without helping this task.
 
-## 7. Voice and users
+## 8. Voice and users
 
 Voice input is transcribed by `mlx-whisper` and passed unchanged to the same
 Gemini rewrite used for typed requests. There is no second hand-written voice
@@ -239,7 +333,7 @@ which is higher than a genuine recording of one of those speakers scores against
 their own vector. They predate the current enrollment flow and have to be
 recorded again through registration before a live demo.
 
-## 8. Application boundary
+## 9. Application boundary
 
 The FastAPI container owns one Gemini client, one Neo4j driver, and the shared
 audio and user services. The two clients are closed during application
@@ -255,7 +349,7 @@ debounces typed fragments and displays lexical suggestions without calling
 Gemini. Chat and voice requests share the same workflow, so they cannot drift
 into separate search implementations.
 
-## 9. Cost and data handling
+## 10. Cost and data handling
 
 At the prices published in July 2026, Gemini 3.5 Flash-Lite costs $0.30 per
 million input tokens and $2.50 per million output tokens. Current prices are
@@ -274,11 +368,14 @@ terms permit limited retention for abuse monitoring. The backend adds its own
 metadata-only logs: model, intent, latency, token counts, and fallback reason. It
 does not log prompts, quote text, audio, API keys, or model responses.
 
-## 10. Evaluation
+## 11. Evaluation
 
-The offline suite is 79 tests over extraction, fixed Cypher generation, the
+The offline suite is 89 tests over extraction, fixed Cypher generation, the
 rewrite contract, intent routing, workflow follow-ups, API mapping, users, ASR,
-speaker identification, and TTS. The frontend adds five component tests.
+speaker identification, and TTS. Several of them exist to hold a boundary rather
+than to check an output: one fails if any read query evaluates a `CASE` or walks
+the attribution path twice, and it caught a regression while the random query was
+being rewritten. The frontend adds five component tests.
 
 The live checks run against the imported dump and the real model rather than
 against fixed expected quotations, which may not exist in a newer `latest` dump.
@@ -287,15 +384,25 @@ kind, a ten-turn conversation mixing new subjects with repeat, alternative, and
 attribution follow-ups, fragment completion, autocomplete, and all fifteen HTTP
 endpoint behaviours including the audio path traversal guard.
 
+Twenty-three prompts were then run against the live graph and the real model,
+chosen to break the rewrite rather than flatter it: heavy misspelling, broken
+grammar, an indirect reference to an author by their book, a request in Spanish,
+an instruction to ignore the instructions, and pure keyboard noise. Every one was
+classified correctly. The rewrite reconstructed "all the world's a stage" from a
+vague description, resolved "the guy who wrote 1984" to Orwell, answered the
+Spanish request from the English graph, and returned typed fields rather than
+prose when told to write a poem. Three faults surfaced that no unit test could
+have found, and section 3, section 6 and section 8 record what they were.
+
 The voice path was closed end to end by synthesizing a spoken question with
 Kokoro, posting the audio to the voice endpoint, and confirming that
 `mlx-whisper` returned the sentence, that the rewrite routed it to the
 author-filtered search, and that the reply came back with generated audio.
 
-## 11. Code reduction
+## 12. Code reduction
 
 Production Python, TypeScript, TSX, and CSS across the repository fell from
-11,924 to 5,156 lines, a reduction of about 57 percent. Most of the removed code
+11,924 to 4,946 lines, a reduction of about 59 percent. Most of the removed code
 was heuristic classification, manual relevance scoring, duplicate endpoint logic,
 compatibility code for the old graph, and the embedding pipeline that the
 rewrite replaced.
@@ -304,7 +411,7 @@ The remaining code is split at boundaries that can be tested with small fake
 clients. The rewrite contract, fixed Neo4j queries, intent routing, workflow
 state, and HTTP mapping each have focused tests.
 
-## 12. Cutover procedure
+## 13. Cutover procedure
 
 The current Neo4j Desktop graph contains 485,421 quotes, 518,770 attributions,
 and 47,062 authors. It has 915,768 relationships: 518,770
