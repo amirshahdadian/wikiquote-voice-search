@@ -192,3 +192,29 @@ def test_readiness_requires_all_search_indexes_online():
         "quote_search_text",
         "author_name",
     ]
+
+
+def test_topic_search_weights_by_speaker_and_keeps_one_quote_each():
+    driver = RecordingDriver()
+    repository = Neo4jQuoteRepository(driver=driver)
+
+    repository.lexical_search("courage bravery", 5)
+
+    query, parameters = driver.calls[0]
+    assert "speaker_weight" in query
+    assert "100.0 + speaker_weight" in query
+    assert "coalesce(author_name, quote_id) AS speaker" in query
+    assert parameters["candidate_limit"] == 1500
+
+
+def test_only_topic_search_is_reweighted():
+    """Author and fragment results have one speaker or exact wording already."""
+    driver = RecordingDriver()
+    repository = Neo4jQuoteRepository(driver=driver)
+
+    repository.author_search("Virginia Woolf", 5)
+    repository.fragment_search("to be", 5)
+    repository.random_quote()
+
+    for query, _ in driver.calls:
+        assert "speaker_weight) " not in query.replace("coalesce", "")

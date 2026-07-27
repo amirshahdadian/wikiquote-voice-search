@@ -71,6 +71,7 @@ CALL (q) {
   OPTIONAL MATCH (attribution)-[:ATTRIBUTED_TO]->(author:Author)
   OPTIONAL MATCH (page_author:Author {key: toLower(trim(attribution.page_title))})
   RETURN coalesce(author.name, page_author.name) AS author_name,
+         coalesce(author.quote_count, page_author.quote_count, 1) AS speaker_weight,
          attribution.work_title AS work_title,
          attribution.citation AS citation,
          attribution.page_title AS page_title
@@ -79,15 +80,30 @@ CALL (q) {
 }
 """
 
+# Lucene scores term density, so a short quotation repeating two search words
+# outranks a famous one that says its subject once. Neo4j exposes no BM25
+# length parameter, so the text score is weighted by how much Wikiquote holds of
+# the speaker, saturating so a prolific author cannot outweigh relevance itself.
+_SPEAKER_PIVOT = 100.0
+
 _LEXICAL_QUERY = (
     """
 CALL db.index.fulltext.queryNodes('quote_text', $query, {limit: $candidate_limit})
 YIELD node AS q, score
 """
     + _ATTRIBUTION_SUBQUERY
-    + """
-RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
-       citation, page_title, score
+    + f"""
+WITH q.id AS quote_id, q.text AS quote_text, author_name, work_title,
+     citation, page_title,
+     score * (toFloat(speaker_weight) / ({_SPEAKER_PIVOT} + speaker_weight)) AS score
+ORDER BY score DESC
+WITH coalesce(author_name, quote_id) AS speaker,
+     collect({{quote_id: quote_id, quote_text: quote_text, author_name: author_name,
+              work_title: work_title, citation: citation, page_title: page_title,
+              score: score}})[0] AS best
+RETURN best.quote_id AS quote_id, best.quote_text AS quote_text,
+       best.author_name AS author_name, best.work_title AS work_title,
+       best.citation AS citation, best.page_title AS page_title, best.score AS score
 ORDER BY score DESC
 LIMIT $limit
 """
@@ -252,6 +268,16 @@ class Neo4jQuoteRepository:
             "work_title": work,
         }
 
+    def refresh_speaker_weights(self) -> None:
+        """Count each author's quotations, which is what weights the text score."""
+        self.driver.execute_query(
+            """
+            MATCH (a:Author)<-[:ATTRIBUTED_TO]-(:Attribution)<-[:HAS_ATTRIBUTION]-(q:Quote)
+            WITH a, count(DISTINCT q) AS total
+            SET a.quote_count = total
+            """
+        )
+
     def verify_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for label in ("Quote", "Attribution", "Author"):
@@ -267,7 +293,7 @@ class Neo4jQuoteRepository:
             _LEXICAL_QUERY,
             search_type="lexical",
             query=_lucene_query(text, "OR"),
-            candidate_limit=max(limit, 50),
+            candidate_limit=1500,
             limit=limit,
         )
 

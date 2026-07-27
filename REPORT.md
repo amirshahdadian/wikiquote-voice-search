@@ -156,6 +156,26 @@ person, the same index is read and then filtered to that person's attributions,
 which separates Einstein's own words from the many quotations that merely
 mention him.
 
+Lucene scores term density, so a ten-word quotation repeating two search words
+outranks a famous one that names its subject once. Asked for courage, the index
+returned "Cowardice, when done correctly, can be its own kind of bravery" first
+and placed Mark Twain's "Courage is resistance to fear" 592nd. Neo4j exposes no
+BM25 length parameter, only the analyzer, so the correction is applied after the
+index rather than inside it: the text score is multiplied by how much Wikiquote
+holds of the speaker, saturating as `weight / (100 + weight)` so that a prolific
+author cannot outweigh relevance itself. Ingestion counts each author's
+quotations once and stores the number on the `Author` node.
+
+Two candidate signals were measured before choosing. How many pages cite a
+quotation turned out to be useless, because 457,537 of 485,421 quotations are
+cited exactly once, Twain's included. How many quotations an author has
+separates them clearly: Shakespeare 2,726 and Twain 348 against 6 for the author
+that outranked him. Topic results then keep one quotation per speaker, so a
+prolific author cannot fill the page. The top five for courage changed from four
+unknown writers to Montaigne, Shakespeare and La Rochefoucauld, and Twain's line
+now answers "me want quote about brave" directly. Retrieval costs about 90 ms
+more per topic search, against a request already dominated by the model call.
+
 Each result follows a `Quote` to one `Attribution`. Nullable author and work
 fields remain null instead of creating fake "Unknown" graph entities.
 

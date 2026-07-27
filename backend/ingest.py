@@ -473,6 +473,7 @@ def main() -> None:
             ),
             batch_size=settings.batch_size,
         )
+        repository.refresh_speaker_weights()
     finally:
         repository.close()
     logger.info(
