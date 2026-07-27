@@ -24,16 +24,16 @@ class FakeSearch:
                 quote_text="Courage is grace under pressure.",
                 author_name="Ernest Hemingway",
                 page_title="Ernest Hemingway",
-                score=1.0,
-                search_type="hybrid",
+                relevance_score=1.0,
+                search_type="lexical",
             ),
             QuoteHit(
                 quote_id="q2",
                 quote_text="Courage starts with showing up.",
                 author_name="Brené Brown",
                 page_title="Brené Brown",
-                score=0.9,
-                search_type="hybrid",
+                relevance_score=0.9,
+                search_type="lexical",
             ),
         ]
 
@@ -103,7 +103,9 @@ def test_empty_search_result_is_explicit():
     )
 
     assert result["warnings"] == ["no_quote_found"]
-    assert result["response_text"] == 'I could not find a reliable match for "courage".'
+    assert result["response_text"] == (
+        'I could not find a reliable match for "something obscure".'
+    )
 
 
 def test_conversation_memory_evicts_the_oldest_conversation():

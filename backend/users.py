@@ -1,182 +1,73 @@
 from __future__ import annotations
 
-import os
 import random
 import re
 import sqlite3
-import tempfile
 from pathlib import Path
 from typing import Any
 
-from backend.config import Settings, settings
+from backend.config import Settings
 
 
 # Sqlite Users
-
-DEFAULT_DB_PATH = settings.resolved_db_path
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS user_profiles (
     user_id TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,
     group_identifier TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS user_tts_preferences (
-    user_id TEXT PRIMARY KEY REFERENCES user_profiles(user_id) ON DELETE CASCADE,
     speaking_rate REAL NOT NULL DEFAULT 1.0,
     energy_scale REAL NOT NULL DEFAULT 1.0,
-    style TEXT NOT NULL DEFAULT 'neutral',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    style TEXT NOT NULL DEFAULT 'neutral'
 );
 """
 
+_PREFERENCE_COLUMNS = ("speaking_rate", "energy_scale", "style")
 
-def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
-    path = Path(db_path or DEFAULT_DB_PATH)
+
+def get_connection(db_path: Path) -> sqlite3.Connection:
+    path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA foreign_keys = ON")
     connection.row_factory = sqlite3.Row
     return connection
 
 
-def initialize_database(db_path: Path | None = None) -> Path:
-    path = Path(db_path or DEFAULT_DB_PATH)
-    with get_connection(path) as connection:
+def initialize_database(db_path: Path) -> Path:
+    with get_connection(db_path) as connection:
         connection.executescript(_SCHEMA)
-    return path
+    return Path(db_path)
 
 
-def save_user_profile(
-    user_id: str,
-    display_name: str,
-    group_identifier: str | None = None,
-    db_path: Path | None = None,
-) -> None:
-    with get_connection(db_path) as connection:
-        connection.execute(
-            """
-            INSERT INTO user_profiles (
-                user_id, display_name, group_identifier
-            ) VALUES (?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                display_name = excluded.display_name,
-                group_identifier = excluded.group_identifier,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (user_id, display_name, group_identifier),
-        )
-
-
-def get_user_profile(
-    user_id: str, db_path: Path | None = None
-) -> dict[str, Any] | None:
+def get_tts_preferences(user_id: str, db_path: Path) -> dict[str, Any] | None:
     with get_connection(db_path) as connection:
         row = connection.execute(
-            """
-            SELECT user_id, display_name, group_identifier,
-                   created_at, updated_at
-            FROM user_profiles
-            WHERE user_id = ?
-            """,
+            "SELECT speaking_rate, energy_scale, style "
+            "FROM user_profiles WHERE user_id = ?",
             (user_id,),
         ).fetchone()
     return dict(row) if row else None
-
-
-def list_user_profiles(db_path: Path | None = None) -> list[dict[str, Any]]:
-    with get_connection(db_path) as connection:
-        rows = connection.execute(
-            """
-            SELECT user_id, display_name, group_identifier,
-                   created_at, updated_at
-            FROM user_profiles
-            ORDER BY display_name COLLATE NOCASE
-            """
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def delete_user_profile(user_id: str, db_path: Path | None = None) -> None:
-    with get_connection(db_path) as connection:
-        connection.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
-
-
-def save_tts_preferences(
-    user_id: str,
-    preferences: dict[str, Any],
-    db_path: Path | None = None,
-) -> None:
-    with get_connection(db_path) as connection:
-        connection.execute(
-            """
-            INSERT INTO user_tts_preferences (
-                user_id, speaking_rate, energy_scale, style
-            ) VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                speaking_rate = excluded.speaking_rate,
-                energy_scale = excluded.energy_scale,
-                style = excluded.style,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (
-                user_id,
-                preferences.get("speaking_rate", 1.0),
-                preferences.get("energy_scale", 1.0),
-                preferences.get("style", "neutral"),
-            ),
-        )
-
-
-def get_tts_preferences(
-    user_id: str, db_path: Path | None = None
-) -> dict[str, Any] | None:
-    with get_connection(db_path) as connection:
-        row = connection.execute(
-            """
-            SELECT speaking_rate, energy_scale, style
-            FROM user_tts_preferences
-            WHERE user_id = ?
-            """,
-            (user_id,),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def delete_tts_preferences(
-    user_id: str, db_path: Path | None = None
-) -> None:
-    with get_connection(db_path) as connection:
-        connection.execute(
-            "DELETE FROM user_tts_preferences WHERE user_id = ?",
-            (user_id,),
-        )
 
 
 # Users
 
 class UserService:
-    """Manage user profiles, embeddings, and personalized voice settings."""
+    """Manage user profiles, voice vectors, and personalized speech settings."""
 
-    def __init__(self, app_settings: Settings, speaker_service: SpeakerIdentificationService):
+    def __init__(self, app_settings: Settings, speaker_service: Any):
         self.settings = app_settings
         self.speaker_service = speaker_service
+        self.db_path = app_settings.resolved_db_path
 
-        initialize_database(self.settings.resolved_db_path)
+        initialize_database(self.db_path)
         self.settings.embeddings_dir.mkdir(parents=True, exist_ok=True)
 
     def list_users(self) -> list[dict[str, Any]]:
-        known_ids = self._all_known_user_ids()
-        users = [self._compose_user_profile(user_id) for user_id in known_ids]
-        return sorted(users, key=lambda item: item["display_name"].lower())
+        return [self._profile(row) for row in self._query("ORDER BY display_name COLLATE NOCASE")]
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
-        if user_id not in self._all_known_user_ids():
-            return None
-        return self._compose_user_profile(user_id)
+        rows = self._query("WHERE user_id = ?", user_id)
+        return self._profile(rows[0]) if rows else None
 
     def register_user(
         self,
@@ -185,60 +76,49 @@ class UserService:
         preferences: dict[str, Any],
         audio_samples: list[tuple[str, bytes]],
     ) -> dict[str, Any]:
-        user_id = self._slugify_user_id(display_name)
+        user_id = re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")
         if not user_id:
             raise ValueError("Display name must contain letters or numbers")
-        if user_id in self._all_known_user_ids():
+        if self.get_user(user_id) is not None:
             raise ValueError(f"User '{user_id}' already exists")
-        if len(audio_samples) < 3:
-            raise ValueError("At least 3 audio samples are required")
 
-        preferences = dict(preferences)
-        preferences["style"] = self._assign_unique_voice()
-        sample_paths = self._materialize_uploads(audio_samples)
-        try:
-            embedding = self.speaker_service.enroll_speaker(sample_paths)
-            self.speaker_service.save_embedding(
-                embedding,
-                str(self.settings.embeddings_dir / f"{user_id}.pkl"),
+        self._save_embedding(user_id, audio_samples)
+        with get_connection(self.db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO user_profiles (
+                    user_id, display_name, group_identifier,
+                    speaking_rate, energy_scale, style
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    display_name,
+                    group_identifier,
+                    preferences.get("speaking_rate", 1.0),
+                    preferences.get("energy_scale", 1.0),
+                    self._unused_voice(),
+                ),
             )
-            save_user_profile(user_id, display_name, group_identifier, self.settings.resolved_db_path)
-            save_tts_preferences(user_id, preferences, self.settings.resolved_db_path)
-            return self._compose_user_profile(user_id)
-        finally:
-            self._cleanup_paths(sample_paths)
+        return self.get_user(user_id)
 
     def re_enroll_user(
         self,
         user_id: str,
         audio_samples: list[tuple[str, bytes]],
     ) -> dict[str, Any]:
-        profile = self.get_user(user_id)
-        if profile is None:
+        if self.get_user(user_id) is None:
             raise KeyError(f"Unknown user '{user_id}'")
-        if len(audio_samples) < 3:
-            raise ValueError("At least 3 audio samples are required")
-
-        sample_paths = self._materialize_uploads(audio_samples)
-        try:
-            embedding = self.speaker_service.enroll_speaker(sample_paths)
-            self.speaker_service.save_embedding(
-                embedding,
-                str(self.settings.embeddings_dir / f"{user_id}.pkl"),
-            )
-            return self._compose_user_profile(user_id)
-        finally:
-            self._cleanup_paths(sample_paths)
+        self._save_embedding(user_id, audio_samples)
+        return self.get_user(user_id)
 
     def delete_user(self, user_id: str) -> None:
         if self.get_user(user_id) is None:
             raise KeyError(f"Unknown user '{user_id}'")
 
-        embedding_path = self.settings.embeddings_dir / f"{user_id}.pkl"
-        if embedding_path.exists():
-            embedding_path.unlink()
-        delete_tts_preferences(user_id, self.settings.resolved_db_path)
-        delete_user_profile(user_id, self.settings.resolved_db_path)
+        self._embedding_path(user_id).unlink(missing_ok=True)
+        with get_connection(self.db_path) as connection:
+            connection.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
 
     def load_recognized_user(self, user_id: str, confidence: float, source: str) -> dict[str, Any]:
         profile = self.get_user(user_id) or {"user_id": user_id, "display_name": user_id}
@@ -249,52 +129,43 @@ class UserService:
             "source": source,
         }
 
-    def _compose_user_profile(self, user_id: str) -> dict[str, Any]:
-        profile = get_user_profile(user_id, self.settings.resolved_db_path)
-        if profile is None:
-            raise KeyError(f"Unknown user '{user_id}'")
-        preferences = get_tts_preferences(user_id, self.settings.resolved_db_path)
+    def _query(self, clause: str, *parameters: Any) -> list[sqlite3.Row]:
+        with get_connection(self.db_path) as connection:
+            return connection.execute(
+                "SELECT user_id, display_name, group_identifier, "
+                f"speaking_rate, energy_scale, style FROM user_profiles {clause}",
+                parameters,
+            ).fetchall()
+
+    def _profile(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
-            "user_id": user_id,
-            "display_name": profile["display_name"],
-            "group_identifier": profile.get("group_identifier"),
-            "has_embedding": (self.settings.embeddings_dir / f"{user_id}.pkl").exists(),
-            "preferences": preferences,
+            "user_id": row["user_id"],
+            "display_name": row["display_name"],
+            "group_identifier": row["group_identifier"],
+            "has_embedding": self._embedding_path(row["user_id"]).exists(),
+            "preferences": {column: row[column] for column in _PREFERENCE_COLUMNS},
         }
 
-    def _assign_unique_voice(self) -> str:
+    def _embedding_path(self, user_id: str) -> Path:
+        return self.settings.embeddings_dir / f"{user_id}.pkl"
+
+    def _save_embedding(self, user_id: str, audio_samples: list[tuple[str, bytes]]) -> None:
+        from backend.voice import write_temp_file
+
+        paths = [write_temp_file(name, payload) for name, payload in audio_samples]
+        try:
+            embedding = self.speaker_service.enroll_speaker(paths)
+            self.speaker_service.save_embedding(embedding, self._embedding_path(user_id))
+        finally:
+            for path in paths:
+                Path(path).unlink(missing_ok=True)
+
+    def _unused_voice(self) -> str:
         from backend.voice import KOKORO_VOICES
 
-        taken: set[str] = set()
-        for uid in self._all_known_user_ids():
-            prefs = get_tts_preferences(uid, self.settings.resolved_db_path)
-            if prefs and prefs.get("style") in KOKORO_VOICES:
-                taken.add(prefs["style"])
-        available = [voice for voice in KOKORO_VOICES if voice not in taken]
-        pool = available if available else list(KOKORO_VOICES)
-        return random.choice(pool)
-
-    def _all_known_user_ids(self) -> list[str]:
-        return [
-            profile["user_id"]
-            for profile in list_user_profiles(self.settings.resolved_db_path)
-        ]
-
-    @staticmethod
-    def _slugify_user_id(display_name: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")
-
-    def _materialize_uploads(self, samples: list[tuple[str, bytes]]) -> list[str]:
-        temp_paths: list[str] = []
-        for filename, payload in samples:
-            suffix = Path(filename or "sample.wav").suffix or ".wav"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                temp_file.write(payload)
-                temp_paths.append(temp_file.name)
-        return temp_paths
-
-    @staticmethod
-    def _cleanup_paths(paths: list[str]) -> None:
-        for path in paths:
-            if os.path.exists(path):
-                os.unlink(path)
+        with get_connection(self.db_path) as connection:
+            taken = {
+                row["style"]
+                for row in connection.execute("SELECT style FROM user_profiles")
+            }
+        return random.choice([v for v in KOKORO_VOICES if v not in taken] or KOKORO_VOICES)

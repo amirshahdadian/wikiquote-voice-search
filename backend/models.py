@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 # Domain
 
@@ -20,19 +20,18 @@ IntentKind = Literal[
 class SearchIntent(BaseModel):
     kind: IntentKind
     search_text: str = ""
+    author: str = ""
     limit: int = Field(default=5, ge=1, le=10)
 
 
 class QuoteHit(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     quote_id: str
     quote_text: str
     author_name: str | None = None
-    work_title: str | None = Field(default=None, alias="source_title")
+    source_title: str | None = None
     citation: str | None = None
     page_title: str
-    score: float = Field(alias="relevance_score")
+    relevance_score: float
     search_type: str
 
 

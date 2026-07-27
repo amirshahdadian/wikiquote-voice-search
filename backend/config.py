@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,41 +11,27 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def configure_logging(level: str) -> None:
     """Configure application logging once at startup."""
-    root_logger = logging.getLogger()
-    if root_logger.handlers:
-        root_logger.setLevel(level.upper())
-        return
-
     logging.basicConfig(
         level=level.upper(),
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     )
+    logging.getLogger().setLevel(level.upper())
 
 
 def log_model_event(
     *,
-    event: Literal["query", "embedding"],
     model: str,
+    intent: str,
     latency_ms: int,
     fallback: str,
-    intent: str | None = None,
     input_tokens: int | None = None,
     output_tokens: int | None = None,
-    dimensions: int | None = None,
 ) -> None:
     """Log model telemetry without request or response content."""
-    fields = [f"event={event}", f"model={model}"]
-    if intent is not None:
-        fields.append(f"intent={intent}")
-    if dimensions is not None:
-        fields.append(f"dimensions={dimensions}")
-    fields.append(f"latency_ms={latency_ms}")
-    if input_tokens is not None:
-        fields.append(f"input_tokens={input_tokens}")
-    if output_tokens is not None:
-        fields.append(f"output_tokens={output_tokens}")
-    fields.append(f"fallback={fallback}")
-    logging.getLogger("backend.models").info(" ".join(fields))
+    logging.getLogger("backend.models").info(
+        "model=%s intent=%s latency_ms=%d input_tokens=%s output_tokens=%s fallback=%s",
+        model, intent, latency_ms, input_tokens, output_tokens, fallback,
+    )
 
 
 # Settings
@@ -70,8 +55,6 @@ class Settings(BaseSettings):
 
     gemini_api_key: SecretStr | None = None
     gemini_llm_model: str = "gemini-3.5-flash-lite"
-    gemini_embedding_model: str = "gemini-embedding-2"
-    gemini_embedding_dimensions: int = Field(default=768, ge=768, le=768)
     gemini_timeout_seconds: float = Field(default=15.0, ge=10.0)
     gemini_max_retries: int = 2
 
@@ -80,19 +63,12 @@ class Settings(BaseSettings):
     parse_page_limit: int | None = None
 
     data_dir: Path = Path("data")
-    artifacts_dir: Path = Path("artifacts")
-    db_path: Path | None = None
+    db_path: Path = Path("data/wikiquote_voice.db")
     xml_file: Path = Path("enwikiquote-20250601-pages-articles.xml")
-
-    quote_min_length: int = 15
-    quote_max_length: int = 800
-    quote_min_words: int = 5
-    quote_max_words: int = 120
-    quote_min_alpha_ratio: float = 0.5
 
     @property
     def resolved_db_path(self) -> Path:
-        return (self.db_path or (self.data_dir / "wikiquote_voice.db")).expanduser()
+        return self.db_path.expanduser()
 
     @property
     def generated_audio_dir(self) -> Path:

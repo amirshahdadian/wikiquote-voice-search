@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-import hashlib
 import re
 import unicodedata
 from collections.abc import Iterable
@@ -37,20 +36,12 @@ SCHEMA_STATEMENTS = [
     CREATE TEXT INDEX quote_search_text IF NOT EXISTS
     FOR (q:Quote) ON (q.search_text)
     """,
-    """
-    CREATE VECTOR INDEX quote_embedding IF NOT EXISTS
-    FOR (q:Quote) ON q.embedding
-    OPTIONS {indexConfig: {
-      `vector.dimensions`: 768,
-      `vector.similarity_function`: 'cosine'
-    }}
-    """,
 ]
 
 
-def ensure_schema(session: Any) -> None:
+def ensure_schema(driver: Any) -> None:
     for statement in SCHEMA_STATEMENTS:
-        session.run(statement)
+        driver.execute_query(statement)
 
 
 # Neo4J Repository
@@ -62,6 +53,7 @@ SET q.text = row.quote,
     q.search_text = row.search_text
 MERGE (a:Attribution {id: row.attribution_id})
 SET a.status = row.quote_type,
+    a.status_rank = row.status_rank,
     a.citation = row.citation,
     a.work_title = row.work_title,
     a.page_title = row.page_title
@@ -77,17 +69,11 @@ _ATTRIBUTION_SUBQUERY = """
 CALL (q) {
   MATCH (q)-[:HAS_ATTRIBUTION]->(attribution:Attribution)
   OPTIONAL MATCH (attribution)-[:ATTRIBUTED_TO]->(author:Author)
-  WITH attribution, author
-  ORDER BY CASE attribution.status
-    WHEN 'sourced' THEN 0
-    WHEN 'attributed' THEN 1
-    WHEN 'disputed' THEN 2
-    ELSE 3
-  END, attribution.page_title
   RETURN author.name AS author_name,
          attribution.work_title AS work_title,
          attribution.citation AS citation,
          attribution.page_title AS page_title
+  ORDER BY attribution.status_rank, attribution.page_title
   LIMIT 1
 }
 """
@@ -106,19 +92,26 @@ LIMIT $limit
 """
 )
 
-_VECTOR_QUERY = (
-    """
-MATCH (q:Quote)
-  SEARCH q IN (
-    VECTOR INDEX quote_embedding
-    FOR $embedding
-    LIMIT $candidate_limit
-  ) SCORE AS score
+_BEST_CLAIM_BY_AUTHOR = """
+WITH q, score, author.name AS author_name, attribution
+  ORDER BY attribution.status_rank, attribution.page_title
+WITH q, score, author_name, head(collect(attribution)) AS attribution
+RETURN q.id AS quote_id, q.text AS quote_text, author_name,
+       attribution.work_title AS work_title,
+       attribution.citation AS citation,
+       attribution.page_title AS page_title,
+       score
 """
-    + _ATTRIBUTION_SUBQUERY
+
+_AUTHOR_TOPIC_QUERY = (
+    """
+CALL db.index.fulltext.queryNodes('quote_text', $query, {limit: $candidate_limit})
+YIELD node AS q, score
+MATCH (q)-[:HAS_ATTRIBUTION]->(attribution:Attribution)-[:ATTRIBUTED_TO]->(author:Author)
+WHERE toLower(author.name) CONTAINS toLower($name)
+"""
+    + _BEST_CLAIM_BY_AUTHOR
     + """
-RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
-       citation, page_title, score
 ORDER BY score DESC
 LIMIT $limit
 """
@@ -139,39 +132,30 @@ RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
 """
 )
 
-_AUTHOR_QUERY = """
+_AUTHOR_QUERY = (
+    """
 CALL db.index.fulltext.queryNodes('author_name', $query, {limit: 5})
-YIELD node AS matched_author, score
-MATCH (q:Quote)-[:HAS_ATTRIBUTION]->(matched_attribution:Attribution)
-      -[:ATTRIBUTED_TO]->(matched_author)
-WITH DISTINCT q, matched_author, score
-CALL (q, matched_author) {
-  MATCH (q)-[:HAS_ATTRIBUTION]->(matched_attribution:Attribution)
-        -[:ATTRIBUTED_TO]->(matched_author)
-  WITH matched_author, matched_attribution
-  ORDER BY CASE matched_attribution.status
-    WHEN 'sourced' THEN 0
-    WHEN 'attributed' THEN 1
-    WHEN 'disputed' THEN 2
-    ELSE 3
-  END, matched_attribution.page_title
-  RETURN matched_author.name AS author_name,
-         matched_attribution.work_title AS work_title,
-         matched_attribution.citation AS citation,
-         matched_attribution.page_title AS page_title
-  LIMIT 1
-}
-RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
-       citation, page_title, score
+YIELD node AS author, score
+MATCH (q:Quote)-[:HAS_ATTRIBUTION]->(attribution:Attribution)-[:ATTRIBUTED_TO]->(author)
+"""
+    + _BEST_CLAIM_BY_AUTHOR
+    + """
 ORDER BY score DESC, quote_text
 LIMIT $limit
 """
+)
 
-def _entity_key(value: str | None) -> str | None:
-    if not value or not value.strip():
-        return None
-    normalized = " ".join(value.split()).casefold()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+STATUS_RANK = {"sourced": 0, "attributed": 1, "disputed": 2}
+
+
+def _status_rank(status: str) -> int:
+    """Order competing claims about the same words. Anything else sorts last."""
+    return STATUS_RANK.get(status, 3)
+
+
+def _author_key(value: str | None) -> str | None:
+    """A readable, collapsed form of the name, unique per author."""
+    return " ".join(value.split()).casefold() if value and value.strip() else None
 
 
 def _search_text(value: str) -> str:
@@ -179,7 +163,7 @@ def _search_text(value: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", normalized).split())
 
 
-def _lucene_query(value: str, operator: str = "AND") -> str:
+def _lucene_query(value: str, operator: str) -> str:
     cleaned = re.sub(r'[+\-!(){}\[\]^"~*?:\\/]', " ", value)
     terms = cleaned.split()
     if not terms:
@@ -206,49 +190,22 @@ class Neo4jQuoteRepository:
         self.driver.close()
 
     def ensure_schema(self) -> None:
-        with self.driver.session() as session:
-            ensure_schema(session)
+        ensure_schema(self.driver)
 
     def is_ready(self) -> bool:
         try:
             self.driver.verify_connectivity()
-            with self.driver.session() as session:
-                record = session.run(
-                    """
-                    SHOW INDEXES YIELD name, state
-                    WHERE name IN $names AND state = 'ONLINE'
-                    RETURN count(*) AS online
-                    """,
-                    names=[
-                        "quote_text",
-                        "quote_search_text",
-                        "author_name",
-                        "quote_embedding",
-                    ],
-                ).single()
-            return bool(record and record["online"] == 4)
+            records, _, _ = self.driver.execute_query(
+                """
+                SHOW INDEXES YIELD name, state
+                WHERE name IN $names AND state = 'ONLINE'
+                RETURN count(*) AS online
+                """,
+                names=["quote_text", "quote_search_text", "author_name"],
+            )
+            return bool(records and records[0]["online"] == 3)
         except Exception:
             return False
-
-    def embeddings_ready(self, model: str, dimensions: int) -> bool:
-        with self.driver.session() as session:
-            record = session.run(
-                """
-                MATCH (q:Quote)
-                RETURN count(q) > 0
-                   AND count(
-                     CASE
-                       WHEN q.embedding IS NOT NULL
-                        AND q.embedding_model = $model
-                        AND q.embedding_dimensions = $dimensions
-                       THEN 1
-                     END
-                   ) = count(q) AS ready
-                """,
-                model=model,
-                dimensions=dimensions,
-            ).single()
-        return bool(record and record["ready"])
 
     def load(self, rows: Iterable[dict[str, Any]], batch_size: int = 1000) -> None:
         batch: list[dict[str, Any]] = []
@@ -261,21 +218,10 @@ class Neo4jQuoteRepository:
             self._write_batch(batch)
 
     def _write_batch(self, rows: list[dict[str, Any]]) -> None:
-        with self.driver.session() as session:
-            session.run(LOAD_QUERY, rows=rows)
+        self.driver.execute_query(LOAD_QUERY, rows=rows)
 
     @staticmethod
     def _prepare_row(row: dict[str, Any]) -> dict[str, Any]:
-        required = (
-            "quote_id",
-            "attribution_id",
-            "quote",
-            "page_title",
-            "quote_type",
-        )
-        missing = [field for field in required if row.get(field) is None]
-        if missing:
-            raise ValueError(f"Quote row is missing required fields: {', '.join(missing)}")
         author = (row.get("author") or "").strip() or None
         work = (row.get("work") or row.get("source") or "").strip() or None
         return {
@@ -285,96 +231,24 @@ class Neo4jQuoteRepository:
             "search_text": _search_text(row["quote"]),
             "page_title": row["page_title"],
             "quote_type": row["quote_type"],
+            "status_rank": _status_rank(row["quote_type"]),
             "citation": row.get("citation"),
-            "author_key": _entity_key(author),
+            "author_key": _author_key(author),
             "author_name": author,
             "work_title": work,
         }
 
-    def verify_counts(self, model: str, dimensions: int) -> dict[str, int]:
-        labels = (
-            "Quote",
-            "Attribution",
-            "Author",
-        )
+    def verify_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
-        with self.driver.session() as session:
-            for label in labels:
-                record = session.run(
-                    f"MATCH (n:{label}) RETURN count(n) AS count"
-                ).single()
-                counts[label] = int(record["count"])
-            record = session.run(
-                """
-                MATCH (q:Quote)
-                WHERE q.embedding IS NULL
-                   OR q.embedding_model IS NULL
-                   OR q.embedding_model <> $model
-                   OR q.embedding_dimensions <> $dimensions
-                RETURN count(q) AS count
-                """,
-                model=model,
-                dimensions=dimensions,
-            ).single()
-            counts["quotes_without_current_embedding"] = int(record["count"])
+        for label in ("Quote", "Attribution", "Author"):
+            records, _, _ = self.driver.execute_query(
+                f"MATCH (n:{label}) RETURN count(n) AS count"
+            )
+            counts[label] = int(records[0]["count"])
         return counts
 
-    def pending_embedding_rows(
-        self, model: str, dimensions: int, limit: int
-    ) -> list[dict[str, str]]:
-        query = """
-        MATCH (q:Quote)
-        WHERE q.embedding IS NULL
-           OR q.embedding_model IS NULL
-           OR q.embedding_model <> $model
-           OR q.embedding_dimensions <> $dimensions
-        RETURN q.id AS quote_id, q.text AS quote_text
-        ORDER BY q.id
-        LIMIT $limit
-        """
-        with self.driver.session() as session:
-            result = session.run(
-                query, model=model, dimensions=dimensions, limit=limit
-            )
-            return [dict(record) for record in result]
-
-    def save_embeddings(
-        self,
-        records: list[dict[str, Any]],
-        *,
-        model: str,
-        dimensions: int,
-    ) -> None:
-        for record in records:
-            if len(record["embedding"]) != dimensions:
-                raise ValueError(
-                    f'Embedding for {record["quote_id"]} has the wrong dimensions'
-                )
-        query = """
-        UNWIND $rows AS row
-        MATCH (q:Quote {id: row.quote_id})
-        SET q.embedding = row.embedding,
-            q.embedding_model = $model,
-            q.embedding_dimensions = $dimensions
-        """
-        with self.driver.session() as session:
-            session.run(
-                query,
-                rows=records,
-                model=model,
-                dimensions=dimensions,
-            )
-
     def lexical_search(self, text: str, limit: int) -> list[QuoteHit]:
-        return self._query_hits(
-            _LEXICAL_QUERY,
-            search_type="lexical",
-            query=_lucene_query(text),
-            candidate_limit=max(limit, 50),
-            limit=limit,
-        )
-
-    def relaxed_lexical_search(self, text: str, limit: int) -> list[QuoteHit]:
+        """Search quotation text. Terms are optional; Lucene ranks the overlap."""
         return self._query_hits(
             _LEXICAL_QUERY,
             search_type="lexical",
@@ -383,12 +257,16 @@ class Neo4jQuoteRepository:
             limit=limit,
         )
 
-    def vector_search(self, vector: list[float], limit: int) -> list[QuoteHit]:
+    def author_topic_search(
+        self, text: str, author: str, limit: int
+    ) -> list[QuoteHit]:
+        """Search quotation text, then keep only one author's attributions."""
         return self._query_hits(
-            _VECTOR_QUERY,
-            search_type="vector",
-            embedding=vector,
-            candidate_limit=max(limit, 50),
+            _AUTHOR_TOPIC_QUERY,
+            search_type="author_topic",
+            query=_lucene_query(text, "OR"),
+            name=author.strip(),
+            candidate_limit=2000,
             limit=limit,
         )
 
@@ -401,18 +279,11 @@ class Neo4jQuoteRepository:
         )
 
     def author_search(self, name: str, limit: int) -> list[QuoteHit]:
+        """Search by author. Every part of the name is required."""
         return self._query_hits(
             _AUTHOR_QUERY,
             search_type="author",
-            query=_lucene_query(name),
-            limit=limit,
-        )
-
-    def autocomplete(self, text: str, limit: int) -> list[QuoteHit]:
-        return self._query_hits(
-            _FRAGMENT_QUERY,
-            search_type="autocomplete",
-            search_text=_search_text(text),
+            query=_lucene_query(name, "AND"),
             limit=limit,
         )
 
@@ -431,18 +302,17 @@ RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
     def _query_hits(
         self, cypher: str, *, search_type: str, **parameters: Any
     ) -> list[QuoteHit]:
-        with self.driver.session() as session:
-            records = session.run(cypher, parameters)
-            return [
-                QuoteHit(
-                    quote_id=record["quote_id"],
-                    quote_text=record["quote_text"],
-                    author_name=record.get("author_name"),
-                    work_title=record.get("work_title"),
-                    citation=record.get("citation"),
-                    page_title=record["page_title"],
-                    score=float(record["score"]),
-                    search_type=search_type,
-                )
-                for record in records
-            ]
+        records, _, _ = self.driver.execute_query(cypher, parameters)
+        return [
+            QuoteHit(
+                quote_id=record["quote_id"],
+                quote_text=record["quote_text"],
+                author_name=record.get("author_name"),
+                source_title=record.get("work_title"),
+                citation=record.get("citation"),
+                page_title=record["page_title"],
+                relevance_score=float(record["score"]),
+                search_type=search_type,
+            )
+            for record in records
+        ]

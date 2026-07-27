@@ -19,6 +19,10 @@ from backend.neo4j import Neo4jQuoteRepository
 
 logger = logging.getLogger(__name__)
 
+MIN_LENGTH, MAX_LENGTH = 15, 800
+MIN_WORDS, MAX_WORDS = 5, 120
+MIN_ALPHA_RATIO = 0.5
+
 QUOTE_TEMPLATES = {
     "quote",
     "cquote",
@@ -98,11 +102,6 @@ class MWParserQuoteExtractor:
         self.seen_attributions: set[str] = set()
         self.processed_pages = 0
         self.total_quotes = 0
-        self.min_length = settings.quote_min_length
-        self.max_length = settings.quote_max_length
-        self.min_words = settings.quote_min_words
-        self.max_words = settings.quote_max_words
-        self.min_alpha_ratio = settings.quote_min_alpha_ratio
 
     def extract_page(
         self,
@@ -369,14 +368,13 @@ class MWParserQuoteExtractor:
             for excluded in EXCLUDED_SECTIONS
         )
 
-    def _is_valid_quote(self, text: str) -> bool:
-        if not text or len(text) < self.min_length or len(text) > self.max_length:
+    @staticmethod
+    def _is_valid_quote(text: str) -> bool:
+        if not text or not MIN_LENGTH <= len(text) <= MAX_LENGTH:
             return False
-        words = text.split()
-        if len(words) < self.min_words or len(words) > self.max_words:
+        if not MIN_WORDS <= len(text.split()) <= MAX_WORDS:
             return False
-        alpha_ratio = sum(character.isalpha() for character in text) / len(text)
-        return alpha_ratio >= self.min_alpha_ratio
+        return sum(c.isalpha() for c in text) / len(text) >= MIN_ALPHA_RATIO
 
     @staticmethod
     def _quote_type(section: str) -> str:

@@ -5,44 +5,16 @@ import uuid
 from collections import OrderedDict
 from typing import Any
 
-from backend.gemini import GeminiService, GeminiUnavailable
 from backend.models import QueryState, QuoteHit, SearchIntent
 
 
-# Hybrid Search
+# Quote Search
 
-def reciprocal_rank_fusion(
-    result_sets: list[list[QuoteHit]], limit: int, k: int = 60
-) -> list[QuoteHit]:
-    scores: dict[str, float] = {}
-    hits: dict[str, QuoteHit] = {}
-    for results in result_sets:
-        for rank, item in enumerate(results, start=1):
-            hits.setdefault(item.quote_id, item)
-            scores[item.quote_id] = scores.get(item.quote_id, 0.0) + 1.0 / (k + rank)
-    ordered = sorted(
-        hits.values(),
-        key=lambda item: (-scores[item.quote_id], item.quote_id),
-    )
-    return [
-        item.model_copy(
-            update={"score": scores[item.quote_id], "search_type": "hybrid"}
-        )
-        for item in ordered[:limit]
-    ]
+class QuoteSearch:
+    """Send each typed intent to one fixed Neo4j query."""
 
-
-class HybridSearch:
-    def __init__(
-        self,
-        repository: Any,
-        gemini: GeminiService,
-        *,
-        semantic_ready: bool = True,
-    ):
+    def __init__(self, repository: Any):
         self.repository = repository
-        self.gemini = gemini
-        self.semantic_ready = semantic_ready
 
     async def search_text(self, query: str, limit: int = 5) -> list[QuoteHit]:
         return await self.search(
@@ -50,12 +22,14 @@ class HybridSearch:
         )
 
     def autocomplete(self, query: str, limit: int = 5) -> list[QuoteHit]:
-        return self.repository.autocomplete(query, limit)
+        return self.repository.fragment_search(query, limit)
 
     async def search(self, intent: SearchIntent) -> list[QuoteHit]:
         if intent.kind == "author":
             return await asyncio.to_thread(
-                self.repository.author_search, intent.search_text, intent.limit
+                self.repository.author_search,
+                intent.search_text or intent.author,
+                intent.limit,
             )
         if intent.kind == "random":
             item = await asyncio.to_thread(self.repository.random_quote)
@@ -69,25 +43,22 @@ class HybridSearch:
             if exact:
                 return exact
             return await asyncio.to_thread(
-                self.repository.relaxed_lexical_search,
+                self.repository.lexical_search,
                 intent.search_text,
                 intent.limit,
             )
-
-        lexical = await asyncio.to_thread(
-            self.repository.lexical_search, intent.search_text, max(intent.limit, 20)
+        if intent.author.strip():
+            narrowed = await asyncio.to_thread(
+                self.repository.author_topic_search,
+                intent.search_text,
+                intent.author,
+                intent.limit,
+            )
+            if narrowed:
+                return narrowed
+        return await asyncio.to_thread(
+            self.repository.lexical_search, intent.search_text, intent.limit
         )
-        if not self.semantic_ready:
-            return lexical[: intent.limit]
-
-        try:
-            vector = await self.gemini.embed_query(intent.search_text)
-        except GeminiUnavailable:
-            return lexical[: intent.limit]
-        semantic = await asyncio.to_thread(
-            self.repository.vector_search, vector, max(intent.limit, 20)
-        )
-        return reciprocal_rank_fusion([lexical, semantic], intent.limit)
 
 
 # Query Workflow
@@ -128,9 +99,7 @@ class QueryWorkflow:
             else:
                 response_text = f'"{selected.quote_text}" — {author}'
         else:
-            response_text = (
-                f'I could not find a reliable match for "{intent.search_text}".'
-            )
+            response_text = f'I could not find a reliable match for "{message}".'
 
         state: QueryState = {
             "intent": intent,
@@ -221,14 +190,11 @@ class ConversationService:
         recognized_user: dict[str, Any] | None,
         warnings: list[str],
     ) -> dict[str, Any]:
-        hits = [
-            hit if isinstance(hit, QuoteHit) else QuoteHit.model_validate(hit)
-            for hit in state.get("hits", [])
-        ]
+        hits: list[QuoteHit] = state.get("hits", [])
         index = min(state.get("result_index", 0), max(len(hits) - 1, 0))
         best = hits[index] if hits else None
         related = [
-            hit.model_dump(by_alias=True)
+            hit.model_dump()
             for hit_index, hit in enumerate(hits)
             if hit_index != index
         ][:3]
@@ -250,7 +216,7 @@ class ConversationService:
             "recognized_user": recognized_user,
             "intent_type": intent.kind if intent else "topic",
             "response_text": response_text,
-            "best_quote": best.model_dump(by_alias=True) if best else None,
+            "best_quote": best.model_dump() if best else None,
             "related_quotes": related,
             "audio_url": audio_url,
             "warnings": list(dict.fromkeys([*state.get("warnings", []), *warnings])),

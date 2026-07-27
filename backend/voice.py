@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import os
 import pickle
 import tempfile
 import urllib.request
@@ -22,6 +21,14 @@ from backend.users import get_tts_preferences
 
 logger = logging.getLogger(__name__)
 
+
+def write_temp_file(filename: str, payload: bytes) -> str:
+    """Spill an upload to disk, because the audio models only take paths."""
+    suffix = Path(filename or "sample.wav").suffix or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+        temp_file.write(payload)
+        return temp_file.name
+
 DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo"
 _INITIAL_PROMPT = (
     "Find quotes about courage, wisdom, love, and happiness. "
@@ -29,56 +36,28 @@ _INITIAL_PROMPT = (
 )
 
 
-class ASRService:
-    def __init__(self, model_name: str = DEFAULT_MODEL):
-        self.model_name = model_name
+def transcribe(audio_path: str, model_name: str = DEFAULT_MODEL) -> str:
+    """Transcribe one audio file, biased towards quotation vocabulary."""
+    import mlx_whisper
 
-    def transcribe(
-        self,
-        audio_path: str,
-        language: str | None = None,
-    ) -> dict[str, Any]:
-        import mlx_whisper
-
-        options: dict[str, Any] = {
-            "fp16": True,
-            "temperature": 0.0,
-            "initial_prompt": _INITIAL_PROMPT,
-        }
-        if language:
-            options["language"] = language
-
-        result = mlx_whisper.transcribe(
-            audio_path,
-            path_or_hf_repo=self.model_name,
-            verbose=False,
-            **options,
-        )
-        text = result["text"].strip()
-        logger.info("Transcription completed")
-        return {
-            "text": text,
-            "language": result.get("language", language or "unknown"),
-            "backend": "mlx",
-            "segments": result.get("segments", []),
-        }
+    result = mlx_whisper.transcribe(
+        audio_path,
+        path_or_hf_repo=model_name,
+        verbose=False,
+        fp16=True,
+        temperature=0.0,
+        initial_prompt=_INITIAL_PROMPT,
+    )
+    logger.info("Transcription completed")
+    return result["text"].strip()
 
 
 # Speaker Id
 
+# resemblyzer imports webrtcvad, which warns before any call site can catch it.
 warnings.filterwarnings(
     "ignore",
     message=".*pkg_resources is deprecated.*",
-    category=UserWarning,
-)
-warnings.filterwarnings(
-    "ignore",
-    message=".*__audioread_load.*",
-    category=FutureWarning,
-)
-warnings.filterwarnings(
-    "ignore",
-    message=".*PySoundFile failed.*",
     category=UserWarning,
 )
 
@@ -120,9 +99,6 @@ class SpeakerIdentificationService:
         self,
         audio_files: list[str],
     ) -> np.ndarray:
-        if not audio_files:
-            raise ValueError("At least 1 audio file required for enrollment")
-
         self._load_encoder()
         waveforms = []
         for path in audio_files:
@@ -136,15 +112,10 @@ class SpeakerIdentificationService:
 
     @staticmethod
     def compute_similarity(first: np.ndarray, second: np.ndarray) -> float:
-        if first.shape != second.shape:
-            return 0.0
-        similarity = float(
-            np.dot(
-                first / np.linalg.norm(first),
-                second / np.linalg.norm(second),
-            )
+        cosine = np.dot(first, second) / (
+            np.linalg.norm(first) * np.linalg.norm(second)
         )
-        return float(np.clip(similarity, 0.0, 1.0))
+        return float(np.clip(cosine, 0.0, 1.0))
 
     def identify_speaker(
         self,
@@ -166,16 +137,13 @@ class SpeakerIdentificationService:
         return best_id, best_score
 
     @staticmethod
-    def save_embedding(embedding: np.ndarray, file_path: str) -> None:
-        path = Path(file_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("wb") as file:
-            pickle.dump(embedding, file)
+    def save_embedding(embedding: np.ndarray, file_path: str | Path) -> None:
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(file_path).write_bytes(pickle.dumps(embedding))
 
     @staticmethod
-    def load_embedding(file_path: str) -> np.ndarray:
-        with Path(file_path).open("rb") as file:
-            return pickle.load(file)
+    def load_embedding(file_path: str | Path) -> np.ndarray:
+        return pickle.loads(Path(file_path).read_bytes())
 
     def load_all_embeddings(self, embeddings_dir: str) -> dict[str, np.ndarray]:
         directory = Path(embeddings_dir)
@@ -317,14 +285,12 @@ class VoiceService:
         self,
         app_settings: Settings,
         speaker_service: SpeakerIdentificationService | None = None,
-        asr_service: ASRService | None = None,
         tts_service: TTSService | None = None,
     ):
         self.settings = app_settings
         self.speaker_service = speaker_service or SpeakerIdentificationService(
             threshold=0.75
         )
-        self.asr_service = asr_service or ASRService()
         self.tts_service = tts_service or TTSService(
             db_path=str(self.settings.resolved_db_path)
         )
@@ -340,24 +306,21 @@ class VoiceService:
         }
 
     def transcribe_bytes(self, audio_bytes: bytes, filename: str) -> str:
-        temp_path = self.write_temp_file(filename, audio_bytes)
+        temp_path = write_temp_file(filename, audio_bytes)
         try:
-            result = self.asr_service.transcribe(temp_path)
-            return result["text"].strip()
+            return transcribe(temp_path)
         finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+            Path(temp_path).unlink(missing_ok=True)
 
     def identify_speaker(self, audio_bytes: bytes, filename: str) -> tuple[str | None, float]:
-        temp_path = self.write_temp_file(filename, audio_bytes)
+        temp_path = write_temp_file(filename, audio_bytes)
         try:
             enrolled_users = self.speaker_service.load_all_embeddings(str(self.settings.embeddings_dir))
             if not enrolled_users:
                 return None, 0.0
             return self.speaker_service.identify_speaker(temp_path, enrolled_users)
         finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+            Path(temp_path).unlink(missing_ok=True)
 
     def synthesize_audio(
         self,
@@ -386,9 +349,4 @@ class VoiceService:
             return None
         return candidate if candidate.exists() else None
 
-    @staticmethod
-    def write_temp_file(filename: str, payload: bytes) -> str:
-        suffix = Path(filename or "sample.wav").suffix or ".wav"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-            temp_file.write(payload)
-            return temp_file.name
+

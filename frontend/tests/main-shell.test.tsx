@@ -25,7 +25,7 @@ const apiMocks = vi.hoisted(() => ({
       source_title: null,
       page_title: "Courage",
       citation: "Interview, 1954",
-      search_type: "hybrid",
+      search_type: "lexical",
     },
     related_quotes: [],
     audio_url: null,

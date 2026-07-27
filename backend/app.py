@@ -33,7 +33,7 @@ from backend.models import (
     VoiceQueryResponse,
 )
 from backend.neo4j import Neo4jQuoteRepository
-from backend.search import ConversationService, HybridSearch, QueryWorkflow
+from backend.search import ConversationService, QueryWorkflow, QuoteSearch
 from backend.users import UserService
 from backend.voice import SpeakerIdentificationService, VoiceService
 
@@ -50,24 +50,14 @@ class AppContainer:
 
         self.gemini_client = self._gemini_client(app_settings)
         gemini_service = GeminiService(
-            self.gemini_client,
-            app_settings.gemini_llm_model,
-            app_settings.gemini_embedding_model,
-            app_settings.gemini_embedding_dimensions,
+            self.gemini_client, app_settings.gemini_llm_model
         )
         self.repository = Neo4jQuoteRepository(
             app_settings.neo4j_uri,
             app_settings.neo4j_username,
             app_settings.neo4j_password,
         )
-        self.search = HybridSearch(
-            self.repository,
-            gemini_service,
-            semantic_ready=self.repository.embeddings_ready(
-                app_settings.gemini_embedding_model,
-                app_settings.gemini_embedding_dimensions,
-            ),
-        )
+        self.search = QuoteSearch(self.repository)
         workflow = QueryWorkflow(gemini_service, self.search)
 
         speaker_service = SpeakerIdentificationService(threshold=0.75)
@@ -105,22 +95,6 @@ def get_container(request: Request) -> AppContainer:
     return request.app.state.container
 
 
-def get_search_service(container: AppContainer = Depends(get_container)) -> HybridSearch:
-    return container.search
-
-
-def get_user_service(container: AppContainer = Depends(get_container)) -> UserService:
-    return container.users
-
-
-def get_voice_service(container: AppContainer = Depends(get_container)) -> VoiceService:
-    return container.voice
-
-
-def get_conversation_service(container: AppContainer = Depends(get_container)) -> ConversationService:
-    return container.conversation
-
-
 # Health
 
 health_router = APIRouter(prefix="/api/health", tags=["health"])
@@ -140,18 +114,18 @@ quotes_router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 async def search_quotes(
     query: str = Query(min_length=1),
     limit: int = Query(default=5, ge=1, le=20),
-    search_service: HybridSearch = Depends(get_search_service),
+    container: AppContainer = Depends(get_container),
 ) -> list[QuoteHit]:
-    return await search_service.search_text(query, limit=limit)
+    return await container.search.search_text(query, limit=limit)
 
 
 @quotes_router.get("/autocomplete", response_model=list[QuoteHit])
 def autocomplete(
     query: str = Query(min_length=1, description="Partial quote fragment for live suggestions"),
     limit: int = Query(default=5, ge=1, le=10),
-    search_service: HybridSearch = Depends(get_search_service),
+    container: AppContainer = Depends(get_container),
 ) -> list[QuoteHit]:
-    return search_service.autocomplete(query, limit=limit)
+    return container.search.autocomplete(query, limit=limit)
 
 
 # Users
@@ -160,13 +134,13 @@ users_router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 @users_router.get("", response_model=list[UserProfile])
-def list_users(user_service: UserService = Depends(get_user_service)) -> list[UserProfile]:
-    return [UserProfile(**user) for user in user_service.list_users()]
+def list_users(container: AppContainer = Depends(get_container)) -> list[UserProfile]:
+    return [UserProfile(**user) for user in container.users.list_users()]
 
 
 @users_router.get("/{user_id}", response_model=UserProfile)
-def get_user(user_id: str, user_service: UserService = Depends(get_user_service)) -> UserProfile:
-    user = user_service.get_user(user_id)
+def get_user(user_id: str, container: AppContainer = Depends(get_container)) -> UserProfile:
+    user = container.users.get_user(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return UserProfile(**user)
@@ -179,7 +153,7 @@ async def register_user(
     speaking_rate: float = Form(default=1.0),
     energy_scale: float = Form(default=1.0),
     audio_samples: list[UploadFile] = File(...),
-    user_service: UserService = Depends(get_user_service),
+    container: AppContainer = Depends(get_container),
 ) -> UserProfile:
     if len(audio_samples) < 3:
         raise HTTPException(status_code=400, detail="At least 3 audio samples are required")
@@ -191,7 +165,7 @@ async def register_user(
     uploads = [(sample.filename or "sample.wav", await sample.read()) for sample in audio_samples]
 
     try:
-        user = user_service.register_user(display_name, group_identifier, preferences, uploads)
+        user = container.users.register_user(display_name, group_identifier, preferences, uploads)
         return UserProfile(**user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -201,14 +175,14 @@ async def register_user(
 async def re_enroll_user(
     user_id: str,
     audio_samples: list[UploadFile] = File(...),
-    user_service: UserService = Depends(get_user_service),
+    container: AppContainer = Depends(get_container),
 ) -> UserProfile:
     if len(audio_samples) < 3:
         raise HTTPException(status_code=400, detail="At least 3 audio samples are required")
 
     uploads = [(sample.filename or "sample.wav", await sample.read()) for sample in audio_samples]
     try:
-        user = user_service.re_enroll_user(user_id, uploads)
+        user = container.users.re_enroll_user(user_id, uploads)
         return UserProfile(**user)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -217,9 +191,9 @@ async def re_enroll_user(
 
 
 @users_router.delete("/{user_id}", status_code=204, response_class=Response)
-def delete_user(user_id: str, user_service: UserService = Depends(get_user_service)) -> Response:
+def delete_user(user_id: str, container: AppContainer = Depends(get_container)) -> Response:
     try:
-        user_service.delete_user(user_id)
+        container.users.delete_user(user_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -233,9 +207,9 @@ chat_router = APIRouter(prefix="/api/chat", tags=["chat"])
 @chat_router.post("/query", response_model=ChatQueryResponse)
 async def chat_query(
     request: ChatQueryRequest,
-    conversation_service: ConversationService = Depends(get_conversation_service),
+    container: AppContainer = Depends(get_container),
 ) -> ChatQueryResponse:
-    payload = await conversation_service.process_chat_query(
+    payload = await container.conversation.process_chat_query(
         message=request.message,
         conversation_id=request.conversation_id,
         selected_user_id=request.selected_user_id,
@@ -253,9 +227,9 @@ async def voice_query(
     audio: UploadFile = File(...),
     conversation_id: str | None = Form(default=None),
     selected_user_id: str | None = Form(default=None),
-    conversation_service: ConversationService = Depends(get_conversation_service),
+    container: AppContainer = Depends(get_container),
 ) -> VoiceQueryResponse:
-    payload = await conversation_service.process_voice_query(
+    payload = await container.conversation.process_voice_query(
         audio_bytes=await audio.read(),
         filename=audio.filename or "voice.wav",
         conversation_id=conversation_id,
@@ -267,9 +241,9 @@ async def voice_query(
 @voice_router.post("/tts/preview", response_model=TTSPreviewResponse)
 def tts_preview(
     request: TTSPreviewRequest,
-    voice_service: VoiceService = Depends(get_voice_service),
+    container: AppContainer = Depends(get_container),
 ) -> TTSPreviewResponse:
-    audio_url, warnings = voice_service.synthesize_audio(
+    audio_url, warnings = container.voice.synthesize_audio(
         text=request.text,
         user_id=request.user_id,
         preferences=request.preferences.model_dump() if request.preferences else None,
@@ -285,9 +259,9 @@ audio_router = APIRouter(prefix="/api/audio", tags=["audio"])
 @audio_router.get("/{audio_id}")
 def get_generated_audio(
     audio_id: str,
-    voice_service: VoiceService = Depends(get_voice_service),
+    container: AppContainer = Depends(get_container),
 ) -> FileResponse:
-    audio_path = voice_service.resolve_audio_path(audio_id)
+    audio_path = container.voice.resolve_audio_path(audio_id)
     if audio_path is None:
         raise HTTPException(status_code=404, detail="Audio file not found")
     return FileResponse(path=audio_path, filename=audio_path.name)
@@ -332,10 +306,6 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     app.include_router(chat_router)
     app.include_router(voice_router)
     app.include_router(audio_router)
-
-    @app.get("/")
-    def root() -> dict[str, str]:
-        return {"name": "Which Quote API", "docs": "/docs"}
 
     return app
 

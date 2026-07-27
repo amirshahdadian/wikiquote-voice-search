@@ -134,7 +134,7 @@ def test_chat_endpoint_accepts_public_quote_field_names():
                 "citation": None,
                 "page_title": "Test Author",
                 "relevance_score": 0.9,
-                "search_type": "hybrid",
+                "search_type": "lexical",
             },
             "related_quotes": [],
             "audio_url": None,

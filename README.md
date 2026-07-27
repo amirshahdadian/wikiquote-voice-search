@@ -5,10 +5,11 @@ Language Processing course project. It imports the English Wikiquote dump into
 Neo4j, completes remembered quote fragments, answers topic and author queries,
 and can read results with a voice assigned to an enrolled user.
 
-The application uses Gemini for two narrow jobs:
-
-1. classify a request into a typed search intent;
-2. create query and document embeddings.
+The application makes one Gemini call per request. That call turns what the user
+said into a typed search intent: which kind of search to run, the words to look
+for in the quotations themselves, and the person's name when one was mentioned.
+Requests arrive misspelled, ungrammatical, or as rough voice transcripts, so the
+rewrite is what makes them findable.
 
 Gemini never writes quotations and never produces Cypher. Every quote and every
 attribution shown to a user comes from Neo4j.
@@ -22,23 +23,26 @@ The graph has three node labels and two relationship types:
                                `--[:ATTRIBUTED_TO]->(Author)
 ```
 
-`Quote` stores the quotation, its fragment-search form, and its embedding.
-`Attribution` stores citation, status, work title, and Wikiquote page title.
-This matters because the same words can appear with different attribution
-claims. `Author` remains a node because author lookup is a core query; works
-and pages are display metadata, so they stay on the attribution instead of
-creating two extra node and relationship types.
+`Quote` stores the quotation and its fragment-search form. `Attribution` stores
+citation, status, the rank that orders competing claims, work title, and the
+Wikiquote page title. This matters because the same words can appear with
+different attribution claims. `Author` remains a node because author lookup is a
+core query; works and pages are display metadata, so they stay on the
+attribution instead of creating two extra node and relationship types.
 
 A query follows a short, fixed workflow:
 
 ```text
-request -> Gemini intent -> Neo4j retrieval -> deterministic response
+request -> Gemini rewrite -> Neo4j full-text retrieval -> deterministic response
 ```
 
-Topic searches combine Neo4j full-text and vector results with reciprocal rank
-fusion. Author and fragment searches use fixed Cypher queries. Autocomplete is
-lexical only, so typing does not make Gemini calls. If Gemini is unavailable,
-topic search still returns full-text results.
+Retrieval is the `quote_text` full-text index, ranked by Lucene. Request terms
+are joined with `OR`, because a request never repeats a quotation word for word
+and requiring every term returns nothing. When the rewrite also names a person,
+the topic results are filtered to that person's attributions. Author and
+fragment searches use fixed Cypher queries. Autocomplete is lexical only, so
+typing does not make Gemini calls. If Gemini is unavailable, the original
+request text is searched unchanged.
 
 One bounded workflow interprets, retrieves, and responds. It cannot choose
 tools, create steps, or execute model output. Its local state store keeps one
@@ -49,23 +53,18 @@ list of filler words, command patterns, or hand-written voice search parser.
 
 ## Models and cost
 
-The default model IDs are:
-
-- `gemini-3.5-flash-lite` for intent classification
-- `gemini-embedding-2` at 768 dimensions for retrieval
+The default model is `gemini-3.5-flash-lite`, used for the one rewrite call.
 
 Google lists Gemini 3.5 Flash-Lite at $0.30 per million input tokens and $2.50
-per million output tokens. Gemini Embedding 2 costs $0.20 per million text
-tokens for normal requests and $0.10 per million text tokens through the Batch
-API. See the current [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
-before budgeting.
+per million output tokens. See the current
+[Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) before
+budgeting.
 
-For a rough example, an intent request with 200 input tokens and 50 output
-tokens costs about $0.000185. Ten thousand such requests cost about $1.85.
-Query embeddings add roughly $0.04 if each query is 20 tokens. A one-time
-backfill of 450,000 quotations averaging 40 to 60 tokens costs about $1.80 to
-$2.70 through the Batch API. Neo4j hosting, audio processing, taxes, and retry
-traffic are not included in these estimates.
+For a rough example, a rewrite request with 400 input tokens and 50 output
+tokens costs about $0.000245. Ten thousand such requests cost about $2.45. There
+is no per-quotation indexing cost, because retrieval reads a full-text index the
+database maintains. Neo4j hosting, audio processing, taxes, and retry traffic
+are not included in these estimates.
 
 Use a Cloud project with active billing for deployed use. Google's
 [Gemini API terms](https://ai.google.dev/gemini-api/terms) state that paid
@@ -79,7 +78,7 @@ personal data in prompts.
 - Python 3.11 or newer
 - Node.js 20 or newer
 - Neo4j 2026.01 or newer
-- a Gemini API key for intent classification and embeddings
+- a Gemini API key for the request rewrite
 - the English Wikiquote pages and articles XML dump
 
 ASR uses `mlx-whisper`, speaker identification uses `resemblyzer`, and TTS uses
@@ -108,46 +107,33 @@ NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=local-password
 GEMINI_API_KEY=...
 GEMINI_LLM_MODEL=gemini-3.5-flash-lite
-GEMINI_EMBEDDING_MODEL=gemini-embedding-2
-GEMINI_EMBEDDING_DIMENSIONS=768
 ```
 
 Keep `.env` out of Git. The application logs model name, intent, token counts,
-latency, and fallback reason. It does not log prompts, audio, API keys,
-embeddings, or full quotation text.
+latency, and fallback reason. It does not log prompts, audio, API keys, or full
+quotation text.
 
 ## Build the graph
 
-Use an empty Neo4j database. Ingestion creates the schema and streams extracted
-rows from the XML dump directly into Neo4j in batches.
+Use an empty Neo4j database. Ingestion creates the constraints and indexes, then
+streams extracted rows from the XML dump directly into Neo4j in batches.
 
 ```bash
 python -m backend.ingest
-python -m backend.maintenance embed
 python -m backend.maintenance verify
 ```
 
-The maintenance commands are:
-
-- `schema`: create constraints plus full-text and vector indexes;
-- `embed`: submit, poll, or import one resumable Gemini batch;
-- `verify`: print current graph and stale embedding counts.
-
-The `embed` command stores only the batch job name and model metadata under
-`artifacts/embeddings/current-job.json`. Run the same command again to poll a
-pending job. When a job succeeds, the command imports vectors in batches and
-removes the state file. It does not submit another job while one is active.
+`verify` prints the current graph counts.
 
 For a small validation load:
 
 ```bash
 PARSE_PAGE_LIMIT=5000 python -m backend.ingest
-python -m backend.maintenance embed
 ```
 
 After import, `verify` should report nonzero counts for `Quote`,
-`Attribution`, and `Author`.
-`quotes_without_current_embedding` should be zero after embedding.
+`Attribution`, and `Author`. Search works as soon as the indexes are online;
+there is no separate indexing job to wait for.
 
 ## Run
 
@@ -198,9 +184,9 @@ Neo4j tools before removing it.
 - `backend/neo4j.py`: graph schema and fixed queries
 - `backend/gemini.py`: typed Gemini boundary
 - `backend/voice.py`: speech recognition, speaker matching, and synthesis
-- `backend/users.py`: SQLite user profiles
+- `backend/users.py`: SQLite user profiles and voice settings
 - `backend/ingest.py`: structural Wikiquote extraction
-- `backend/maintenance.py`: schema, embedding, and verification commands
+- `backend/maintenance.py`: graph verification command
 - `frontend/components/main-shell.tsx`: main text and voice interface
 - `REPORT.md`: design and evaluation report
 

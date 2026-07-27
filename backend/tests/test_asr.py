@@ -4,23 +4,25 @@ import logging
 import sys
 from types import SimpleNamespace
 
-from backend.voice import ASRService
+from backend.voice import transcribe
 
 
 def test_transcription_is_not_rewritten_or_logged(monkeypatch, caplog):
-    transcript = "Um, find me quotes about courage"
-    fake_whisper = SimpleNamespace(
-        transcribe=lambda *args, **kwargs: {
-            "text": transcript,
-            "language": "en",
-            "segments": [],
-        }
+    spoken = "Um, find me quotes about courage"
+    calls = {}
+
+    def fake_transcribe(path, **kwargs):
+        calls.update(kwargs)
+        return {"text": f"  {spoken}  ", "language": "en", "segments": []}
+
+    monkeypatch.setitem(
+        sys.modules, "mlx_whisper", SimpleNamespace(transcribe=fake_transcribe)
     )
-    monkeypatch.setitem(sys.modules, "mlx_whisper", fake_whisper)
 
     with caplog.at_level(logging.INFO):
-        result = ASRService().transcribe("sample.wav")
+        result = transcribe("sample.wav")
 
-    assert result["text"] == transcript
-    assert "normalized_text" not in result
-    assert transcript not in caplog.text
+    assert result == spoken
+    assert spoken not in caplog.text
+    assert calls["temperature"] == 0.0
+    assert "quotes" in calls["initial_prompt"]

@@ -1,49 +1,39 @@
 import asyncio
 from types import SimpleNamespace
 
-import pytest
-
 from backend.models import SearchIntent
-from backend.gemini import (
-    GeminiService,
-    GeminiUnavailable,
-    prepare_document,
-    prepare_query,
-)
+from backend.gemini import GeminiService, _INTENT_INSTRUCTION
 
 
 class FakeModels:
-    def __init__(self):
+    def __init__(self, intent=None):
         self.last_contents = None
+        self.last_config = None
+        self.intent = intent or SearchIntent(
+            kind="author", search_text="Virginia Woolf", limit=5
+        )
 
     async def generate_content(self, **kwargs):
         self.last_contents = kwargs["contents"]
-        return SimpleNamespace(
-            parsed=SearchIntent(kind="author", search_text="Virginia Woolf", limit=5)
-        )
-
-    async def embed_content(self, **kwargs):
-        assert kwargs["contents"] == "task: search result | query: courage"
-        return SimpleNamespace(embeddings=[SimpleNamespace(values=[0.0] * 768)])
+        self.last_config = kwargs["config"]
+        return SimpleNamespace(parsed=self.intent)
 
 
 class FakeClient:
-    def __init__(self):
-        self.models = FakeModels()
+    def __init__(self, intent=None):
+        self.models = FakeModels(intent)
         self.aio = SimpleNamespace(models=self.models)
 
 
-def test_embedding_formats_match_gemini_embedding_2_docs():
-    assert prepare_query("courage") == "task: search result | query: courage"
-    assert prepare_document("Stay hungry.") == "title: none | text: Stay hungry."
+def service(client) -> GeminiService:
+    return GeminiService(client, "gemini-3.5-flash-lite")
 
 
 def test_interpret_returns_validated_schema():
     client = FakeClient()
-    service = GeminiService(client, "gemini-3.5-flash-lite", "gemini-embedding-2", 768)
 
     intent = asyncio.run(
-        service.interpret(
+        service(client).interpret(
             "quotes by Virginia Woolf",
             [
                 {"role": "user", "content": "find something about courage"},
@@ -61,32 +51,62 @@ def test_interpret_returns_validated_schema():
     assert "A quotation that should stay out" not in client.models.last_contents
 
 
-def test_missing_client_falls_back_to_topic_intent():
-    service = GeminiService(
-        None, "gemini-3.5-flash-lite", "gemini-embedding-2", 768
+def test_the_current_request_is_labelled_apart_from_earlier_ones():
+    client = FakeClient()
+
+    asyncio.run(
+        service(client).interpret(
+            "something about the sea",
+            [
+                {"role": "user", "content": "who said that?"},
+                {"role": "user", "content": "repeat that"},
+            ],
+        )
     )
 
-    intent = asyncio.run(service.interpret("hope in difficult times", []))
+    prompt = client.models.last_contents
+    assert prompt.splitlines() == [
+        "earlier request: who said that?",
+        "earlier request: repeat that",
+        "current request: something about the sea",
+    ]
+    assert "Classify the current request only" in _INTENT_INSTRUCTION
+
+
+def test_interpret_carries_the_rewrite_instruction_and_typed_schema():
+    client = FakeClient()
+
+    asyncio.run(service(client).interpret("courage", []))
+
+    assert client.models.last_config.response_schema is SearchIntent
+    assert "search_text is matched against the text of the quotations" in (
+        _INTENT_INSTRUCTION
+    )
+    assert "never write a query language" in _INTENT_INSTRUCTION
+
+
+def test_a_named_person_in_a_topic_request_survives_as_a_filter():
+    client = FakeClient(
+        SearchIntent(kind="topic", search_text="imagination knowledge", author="Einstein")
+    )
+
+    intent = asyncio.run(service(client).interpret("wat did einstein say about imaginaton", []))
+
+    assert intent.author == "Einstein"
+    assert intent.search_text == "imagination knowledge"
+
+
+def test_an_empty_rewrite_falls_back_to_the_original_request():
+    client = FakeClient(SearchIntent(kind="topic", search_text="   "))
+
+    intent = asyncio.run(service(client).interpret("hope in difficult times", []))
+
+    assert intent.search_text == "hope in difficult times"
+
+
+def test_missing_client_falls_back_to_topic_intent():
+    intent = asyncio.run(service(None).interpret("hope in difficult times", []))
 
     assert intent == SearchIntent(
         kind="topic", search_text="hope in difficult times", limit=5
     )
-
-
-def test_embed_query_requires_exact_dimensions():
-    service = GeminiService(
-        FakeClient(), "gemini-3.5-flash-lite", "gemini-embedding-2", 768
-    )
-
-    vector = asyncio.run(service.embed_query("courage"))
-
-    assert len(vector) == 768
-
-
-def test_embed_query_without_client_is_explicitly_unavailable():
-    service = GeminiService(
-        None, "gemini-3.5-flash-lite", "gemini-embedding-2", 768
-    )
-
-    with pytest.raises(GeminiUnavailable):
-        asyncio.run(service.embed_query("courage"))

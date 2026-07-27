@@ -15,11 +15,11 @@ HIT = QuoteHit(
     quote_id="quote-1",
     quote_text="Simplicity is prerequisite for reliability.",
     author_name="Edsger Dijkstra",
-    work_title=None,
+    source_title=None,
     citation="EWD 498",
     page_title="Edsger W. Dijkstra",
-    score=0.91,
-    search_type="hybrid",
+    relevance_score=0.91,
+    search_type="lexical",
 )
 
 
@@ -32,7 +32,7 @@ def test_quote_hit_uses_public_api_field_names_when_serialized():
         "citation": "EWD 498",
         "page_title": "Edsger W. Dijkstra",
         "relevance_score": 0.91,
-        "search_type": "hybrid",
+        "search_type": "lexical",
     }
 
 

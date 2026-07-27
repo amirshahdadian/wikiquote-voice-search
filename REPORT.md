@@ -12,9 +12,9 @@ The first implementation grew around a large deterministic parser and a
 hand-written search pipeline. It worked, but its graph mixed canonical quotes
 with display fields, and its search logic had become hard to explain or test.
 
-The current design separates quotations from attribution claims. It uses
-Neo4j full-text and vector indexes for retrieval, Gemini for typed intent
-classification and embeddings, and a small bounded workflow for conversation
+The current design separates quotations from attribution claims. Retrieval is
+the Neo4j full-text index. One Gemini call per request rewrites what the user
+said into a typed search intent, and a small bounded workflow keeps conversation
 state. The model does not write quotes, generate Cypher, or decide which tools
 to run.
 
@@ -33,8 +33,7 @@ The implementation uses:
 
 - `mwparserfromhell` for MediaWiki markup;
 - Neo4j 2026.06 for graph storage and search;
-- Gemini 3.5 Flash-Lite for intent classification;
-- Gemini Embedding 2 for 768-dimensional vectors;
+- Gemini 3.5 Flash-Lite for the request rewrite;
 - `mlx-whisper` for speech recognition on Apple Silicon;
 - `resemblyzer` for speaker embeddings;
 - `kokoro-onnx` for speech synthesis;
@@ -86,71 +85,90 @@ It has two relationship types:
 (Attribution)-[:ATTRIBUTED_TO]->(Author)
 ```
 
-`Quote` contains `id`, `text`, `search_text`, `embedding`, `embedding_model`,
-and `embedding_dimensions`. `Attribution` contains status, citation, work
-title, and Wikiquote page title. These fields describe a claim about a
-quotation, not the words themselves. `Author` remains a node because lookup by
-author is a core query. Work and page values are display metadata, so separate
-nodes and traversals would add structure without supporting another query.
+`Quote` contains `id`, `text`, and `search_text`. `Attribution` contains status,
+its stored preference rank, citation, work title, and Wikiquote page title.
+These fields describe a claim about a quotation, not the words themselves.
+
+`Author` remains a node because lookup by author is a core query, and it is
+keyed by its own collapsed, lower-cased name so the graph reads plainly in
+Neo4j Browser. Work and page values are display metadata, so separate nodes and
+traversals would add structure without supporting another query.
 
 Neo4j constraints make quote IDs, attribution IDs, and author keys unique. Two
 full-text indexes cover quote text and author names. A text index handles
-punctuation-insensitive fragments. The vector index uses cosine similarity and
-768 dimensions.
+punctuation-insensitive fragments.
 
 Ingestion creates the schema and streams extracted rows from the XML dump
-directly into Neo4j. The maintenance CLI keeps three explicit commands:
+directly into Neo4j, creating the constraints and indexes itself, so the
+maintenance CLI keeps one command:
 
 ```bash
-python -m backend.maintenance schema
-python -m backend.maintenance embed
 python -m backend.maintenance verify
 ```
 
-The verification command reports current node counts and quotes with missing
-or stale embeddings.
+It reports current node counts.
 
-## 4. Embeddings
+## 4. The request rewrite
 
-Document embeddings use `gemini-embedding-2` with 768 output dimensions. Input
-text follows the model's retrieval format:
+An earlier version of this project planned to embed all 522,590 quotations and
+fuse vector results with full-text results. That backfill was never run, so the
+vector path never executed, and the words a person says when asking for a quote
+were sent to the full-text index unchanged. Every term was required, which made
+the frequent case return nothing at all:
 
-```text
-title: none | text: <quotation>
-```
+| request | old retrieval | current retrieval |
+| --- | --- | --- |
+| "wat did einstein say about imaginaton" | no results | Einstein on imagination and knowledge |
+| "how do i be brave when i am scared" | no results | Twain on courage as mastery of fear |
+| "i wanna know sumthing about how ur mistakes make u learn better" | no results | "Mistakes are valuable lessons often learned too late." |
 
-Query embeddings use:
+The one Gemini call per request now returns three fields instead of one. `kind`
+is the search to run. `search_text` holds the words a matching quotation would
+itself contain, spelled correctly, with filler and question words dropped and
+close synonyms added; for a remembered fragment it stays verbatim, because exact
+wording is the point of that intent. `author` holds a person's name when a topic
+request also mentions one.
 
-```text
-task: search result | query: <request>
-```
+The rewrite is a schema-constrained response, so the model returns fields, never
+Lucene and never Cypher. Query terms are still stripped of Lucene operators
+before they reach the index. If the rewrite fails or no API key is configured,
+the original request text is searched unchanged, so the system degrades to the
+behaviour it had before rather than to an error.
 
-The backfill uses Gemini's Batch API. Each JSONL row is keyed by the stable
-quote ID. One local state file records the active job name, model, dimensions,
-and submission time. Repeated `embed` commands poll that job instead of
-creating duplicates. Successful results are checked for the expected vector
-length before they are written to Neo4j.
+Removing embeddings deleted the batch submission and polling code, the vector
+index, the stored vectors, the rank fusion, the embedding settings, and the
+`embed` command: about 300 lines, and the entire per-quotation indexing cost.
 
 ## 5. Retrieval
 
-The runtime exposes fixed repository methods for lexical search, vector search,
-author search, autocomplete, and random selection. Model text is never
-interpolated into Cypher.
+The runtime exposes fixed repository methods for lexical search, author-filtered
+topic search, author search, fragment search, autocomplete, and random
+selection. Model text is never interpolated into Cypher.
 
-Topic retrieval runs full-text and vector searches, then combines their ranks
-with reciprocal rank fusion. It does not try to compare raw full-text scores
-with cosine scores. Quote fragments remain lexical because exact wording is
-more useful than semantic similarity for that intent. Autocomplete is also
-lexical and never calls Gemini.
+Topic retrieval reads the `quote_text` full-text index and takes Lucene's
+ranking. Terms are joined with `OR`: a request never repeats a quotation word
+for word, so requiring every term is what produced the empty results above, and
+Lucene already weights rare words above common ones. When the rewrite names a
+person, the same index is read and then filtered to that person's attributions,
+which separates Einstein's own words from the many quotations that merely
+mention him.
 
-Each result follows a `Quote` to one `Attribution`. Sourced claims are preferred
-over attributed, disputed, and other claims. Nullable author and work fields
-remain null instead of creating fake "Unknown" graph entities.
+Each result follows a `Quote` to one `Attribution`. Nullable author and work
+fields remain null instead of creating fake "Unknown" graph entities.
 
-If the query embedding request fails, the lexical results are returned. If
-intent classification fails or no API key is configured, the request becomes a
-topic search using the original text. Search therefore remains usable during a
-Gemini outage.
+Choosing that one attribution is the only part of retrieval that is not a
+straight lookup, because 28,557 quotations carry more than one claim. The
+preference order is stored: ingestion writes `Attribution.status_rank`, 0 for
+sourced through 3 for anything else, so every query orders by one integer
+property instead of evaluating a four-branch `CASE` at read time. The ranking
+changes the answer for 2,444 quotations, which is why it is kept and why it is
+cheap.
+
+There are then two query shapes, one per way of reaching a quotation. Text
+searches arrive with no claim in hand and call a subquery that picks the
+quotation's best claim. Author searches already hold the claim that matched the
+author, so they order and take the first with `head(collect(...))` and share a
+single result clause. Neither shape walks the attribution path twice.
 
 ## 6. Conversation workflow
 
@@ -160,6 +178,14 @@ is keyed by conversation ID. Repeat, alternative, and attribution follow-ups
 reuse the latest result. Each thread stores eight history messages, and a
 least-recently-used cap keeps no more than 1,000 threads in process memory.
 
+Because the follow-up results come from that store rather than from the model,
+the model only has to name the kind of the current utterance. The prompt
+therefore labels the current request apart from the two earlier ones, which are
+present only to resolve words like "he" or "that". An unlabelled history was
+enough to make a new subject read as another follow-up: after "who said that?"
+and "repeat that", a fresh request about learning from mistakes came back as
+`repeat` and returned the previous quotation.
+
 This is orchestration, not an autonomous agent. There is no planner loop, tool
 catalog, generated query language, or open-ended model response. A more
 general agent would add cost and failure modes without helping this task.
@@ -167,8 +193,9 @@ general agent would add cost and failure modes without helping this task.
 ## 7. Voice and users
 
 Voice input is transcribed by `mlx-whisper` and passed unchanged to the same
-Gemini intent classifier used for typed requests. There is no second
-hand-written voice command parser. If the user did not choose a profile,
+Gemini rewrite used for typed requests. There is no second hand-written voice
+command parser. Transcription errors and spoken filler are handled by the
+rewrite, not by a list of stop words. If the user did not choose a profile,
 `resemblyzer` compares the incoming speaker vector with enrolled user
 embeddings. The selected or recognized user ID determines the Kokoro voice and
 speech preferences.
@@ -179,6 +206,15 @@ There is no hidden network fallback.
 
 User metadata and voice preferences are stored in SQLite. Speaker vectors and
 generated audio remain local files.
+
+Identification was measured with two enrolled speakers and a held-out utterance
+neither enrollment had seen. The correct speaker scored 0.897 and 0.888 while the
+two speakers scored 0.578 against each other, so the 0.75 threshold separates
+them with room on both sides. The two speaker vectors currently committed under
+`data/embeddings` do not meet that standard: they score 0.708 against each other,
+which is higher than a genuine recording of one of those speakers scores against
+their own vector. They predate the current enrollment flow and have to be
+recorded again through registration before a live demo.
 
 ## 8. Application boundary
 
@@ -199,45 +235,51 @@ into separate search implementations.
 ## 9. Cost and data handling
 
 At the prices published in July 2026, Gemini 3.5 Flash-Lite costs $0.30 per
-million input tokens and $2.50 per million output tokens. Gemini Embedding 2
-text input costs $0.20 per million tokens for standard requests and $0.10
-through the Batch API. Current prices are published on the
+million input tokens and $2.50 per million output tokens. Current prices are
+published on the
 [Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricing).
 
-An intent request with 200 input tokens and 50 output tokens costs about
-$0.000185. At 10,000 requests per month, that is about $1.85. Query embeddings
-of 20 tokens each add about $0.04. Backfilling 450,000 quotations averaging 40
-to 60 tokens costs about $1.80 to $2.70 through batch processing. These figures
-exclude Neo4j and audio compute.
+A rewrite request with 400 input tokens and 50 output tokens costs about
+$0.000245. At 10,000 requests per month, that is about $2.45. Nothing is charged
+per quotation, because the index the search reads is maintained by the database.
+These figures exclude Neo4j and audio compute.
 
 The deployed application should use a Cloud project with active billing.
 Google's [Gemini API terms](https://ai.google.dev/gemini-api/terms) say paid
 service prompts and responses are not used to improve Google products. The
 terms permit limited retention for abuse monitoring. The backend adds its own
-metadata-only logs: event, model, intent, latency, token counts, dimensions,
-and fallback reason. It does not log prompts, quote text, audio, API keys,
-vectors, or model responses.
+metadata-only logs: model, intent, latency, token counts, and fallback reason. It
+does not log prompts, quote text, audio, API keys, or model responses.
 
 ## 10. Evaluation
 
-The offline suite covers extraction, fixed Cypher generation, rank fusion,
-workflow follow-ups, API mapping, users, ASR, speaker identification, and TTS.
-Live checks use reviewable requests against the imported dump: exact fragments,
-author lookup, topic lookup, random selection, attribution follow-up, and a
-recorded voice request. This avoids fixed expected quotations that may not
-exist in a newer `latest` Wikiquote dump.
+The offline suite is 79 tests over extraction, fixed Cypher generation, the
+rewrite contract, intent routing, workflow follow-ups, API mapping, users, ASR,
+speaker identification, and TTS. The frontend adds five component tests.
+
+The live checks run against the imported dump and the real model rather than
+against fixed expected quotations, which may not exist in a newer `latest` dump.
+They cover the rewrite on misspelled and ungrammatical requests, each intent
+kind, a ten-turn conversation mixing new subjects with repeat, alternative, and
+attribution follow-ups, fragment completion, autocomplete, and all fifteen HTTP
+endpoint behaviours including the audio path traversal guard.
+
+The voice path was closed end to end by synthesizing a spoken question with
+Kokoro, posting the audio to the voice endpoint, and confirming that
+`mlx-whisper` returned the sentence, that the rewrite routed it to the
+author-filtered search, and that the reply came back with generated audio.
 
 ## 11. Code reduction
 
 Production Python, TypeScript, TSX, and CSS across the repository fell from
-11,924 to 5,914 lines, a reduction of about 50 percent.
-Most of the removed code was heuristic classification,
-manual relevance scoring, duplicate endpoint logic, and compatibility code for
-the old graph.
+11,924 to 5,156 lines, a reduction of about 57 percent. Most of the removed code
+was heuristic classification, manual relevance scoring, duplicate endpoint logic,
+compatibility code for the old graph, and the embedding pipeline that the
+rewrite replaced.
 
 The remaining code is split at boundaries that can be tested with small fake
-clients. Gemini classification, vector embedding, fixed Neo4j queries, rank
-fusion, workflow state, and HTTP mapping each have focused tests.
+clients. The rewrite contract, fixed Neo4j queries, intent routing, workflow
+state, and HTTP mapping each have focused tests.
 
 ## 12. Cutover procedure
 
@@ -247,6 +289,6 @@ and 47,062 authors. It has 953,857 relationships: 556,853
 has a page title, all indexes are online, and integrity checks report no blank
 or orphan nodes. A stopped Docker volume preserves the pre-cutover graph.
 
-The remaining deployment step is the paid Gemini embedding backfill. Vector
-retrieval stays disabled until every quote has the configured model and 768
-dimensions; lexical, fragment, and author retrieval remain available.
+There is no remaining indexing step. Retrieval works against the graph as
+imported, and the only deployment requirement is a Gemini API key for the
+rewrite. Without one, requests are searched as typed.
