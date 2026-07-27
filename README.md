@@ -15,20 +15,19 @@ attribution shown to a user comes from Neo4j.
 
 ## Architecture
 
-The graph has five node labels and four relationship types:
+The graph has three node labels and two relationship types:
 
 ```text
 (Quote)-[:HAS_ATTRIBUTION]->(Attribution)
-                               |--[:ATTRIBUTED_TO]->(Author)
-                               |--[:FROM_WORK]->(Work)
-                               `--[:FOUND_ON]->(WikiquotePage)
+                               `--[:ATTRIBUTED_TO]->(Author)
 ```
 
-`Quote` stores only the quotation and its embedding. `Attribution` stores
-citation, status, locator, year, and section. This matters because the same
-words can appear on several Wikiquote pages with different attribution claims.
-Page and revision IDs are kept so an imported statement can be traced back to
-the dump.
+`Quote` stores the quotation, its fragment-search form, and its embedding.
+`Attribution` stores citation, status, work title, and Wikiquote page title.
+This matters because the same words can appear with different attribution
+claims. `Author` remains a node because author lookup is a core query; works
+and pages are display metadata, so they stay on the attribution instead of
+creating two extra node and relationship types.
 
 A query follows a short, fixed workflow:
 
@@ -147,7 +146,7 @@ python -m backend.app.cli.maintenance embed
 ```
 
 After import, `verify` should report nonzero counts for `Quote`,
-`Attribution`, `Author`, `Work`, and `WikiquotePage`.
+`Attribution`, and `Author`.
 `quotes_without_current_embedding` should be zero after embedding.
 
 ## Run

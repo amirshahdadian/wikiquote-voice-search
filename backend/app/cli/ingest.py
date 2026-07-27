@@ -8,7 +8,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 import mwparserfromhell
@@ -57,19 +57,24 @@ class ExtractedQuote:
     page_title: str
     page_type: str
     work: str | None = None
-    source_locator: str | None = None
     citation: str | None = None
-    year: str | None = None
-    context: str | None = None
     quote_type: str = "sourced"
-    normalized_quote: str | None = None
     page_id: int | None = None
-    revision_id: int | None = None
     quote_id: str | None = None
     attribution_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {key: value for key, value in asdict(self).items() if value is not None}
+        values = {
+            "quote": self.quote,
+            "author": self.author,
+            "work": self.work,
+            "citation": self.citation,
+            "page_title": self.page_title,
+            "quote_type": self.quote_type,
+            "quote_id": self.quote_id,
+            "attribution_id": self.attribution_id,
+        }
+        return {key: value for key, value in values.items() if value is not None}
 
 @dataclass(frozen=True, slots=True)
 class PageMetadata:
@@ -103,7 +108,6 @@ class MWParserQuoteExtractor:
         self,
         title: str,
         page_id: int,
-        revision_id: int,
         wikitext: str,
     ) -> list[ExtractedQuote]:
         if not self._should_process_page(title, wikitext):
@@ -118,7 +122,6 @@ class MWParserQuoteExtractor:
         rows: list[ExtractedQuote] = []
         for raw_quote in raw_quotes:
             raw_quote.page_id = page_id
-            raw_quote.revision_id = revision_id
             quote = self._finalize_quote(raw_quote)
             if quote.attribution_id in self.seen_attributions:
                 continue
@@ -136,12 +139,9 @@ class MWParserQuoteExtractor:
             title = self._child_text(element, "title")
             page_id = self._direct_child_int(element, "id")
             revision = self._direct_child(element, "revision")
-            revision_id = (
-                self._direct_child_int(revision, "id") if revision is not None else None
-            )
             text = self._child_text(revision, "text") if revision is not None else ""
-            if title and page_id is not None and revision_id is not None:
-                extracted = self.extract_page(title, page_id, revision_id, text)
+            if title and page_id is not None:
+                extracted = self.extract_page(title, page_id, text)
                 yield from (item.to_dict() for item in extracted)
                 self.processed_pages += 1
             element.clear()
@@ -245,14 +245,12 @@ class MWParserQuoteExtractor:
                         and bool(re.search(r"''+\s*\[\[", citation))
                     )
                 )
-                author, work, locator, year = self._parse_attribution(
+                author, work = self._parse_attribution(
                     citation,
                     infer_author=infer_author,
                 )
                 pending.author = author or pending.author
                 pending.work = work or pending.work
-                pending.source_locator = locator
-                pending.year = year
                 pending.citation = self._clean(citation)
                 continue
 
@@ -269,7 +267,6 @@ class MWParserQuoteExtractor:
                 work=metadata.default_work,
                 page_title=metadata.title,
                 page_type=metadata.page_type,
-                context=section or None,
                 quote_type=self._quote_type(section),
             )
         flush()
@@ -280,7 +277,7 @@ class MWParserQuoteExtractor:
         text: str,
         *,
         infer_author: bool = True,
-    ) -> tuple[str | None, str | None, str | None, str | None]:
+    ) -> tuple[str | None, str | None]:
         italic_links = [
             self._link_text(match)
             for match in re.findall(
@@ -309,28 +306,14 @@ class MWParserQuoteExtractor:
         if template_title:
             work = self._clean(template_title.group(1))
 
-        year_match = re.search(r"\b(1\d{3}|20\d{2})\b", self._clean(text))
-        locator_match = re.search(
-            r"\b((?:Act|Scene|Book|Chapter|Part|Episode|Season)\s+[^,;]+)",
-            self._clean(text),
-            re.IGNORECASE,
-        )
-        return (
-            author or None,
-            work or None,
-            self._clean(locator_match.group(1)) if locator_match else None,
-            year_match.group(1) if year_match else None,
-        )
+        return author or None, work or None
 
     def _finalize_quote(self, quote: ExtractedQuote) -> ExtractedQuote:
         quote.quote = self._clean(quote.quote)
         quote.author = self._clean(quote.author) or None
         quote.work = self._clean(quote.work) or None
         quote.citation = self._clean(quote.citation) or None
-        quote.source_locator = self._clean(quote.source_locator) or None
-        quote.context = self._clean(quote.context) or None
-        quote.normalized_quote = self._normalize(quote.quote)
-        quote.quote_id = stable_id(quote.normalized_quote)
+        quote.quote_id = stable_id(self._normalize(quote.quote))
         quote.attribution_id = stable_id(
             quote.quote_id,
             quote.page_id,

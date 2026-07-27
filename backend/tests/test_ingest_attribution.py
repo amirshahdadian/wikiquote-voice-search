@@ -29,12 +29,11 @@ def test_golden_page_extraction(case):
     rows = extractor.extract_page(
         case["title"],
         case["page_id"],
-        case["revision_id"],
         case["wikitext"],
     )
 
     actual = [
-        {field: row.to_dict().get(field) for field in SEMANTIC_FIELDS}
+        {field: getattr(row, field) for field in SEMANTIC_FIELDS}
         for row in rows
     ]
     assert actual == case["expected"]
@@ -49,7 +48,6 @@ def test_quote_id_is_stable_across_pages():
             page_title="Steve Jobs",
             page_type="person",
             page_id=10,
-            revision_id=20,
         )
     )
     second = extractor._finalize_quote(
@@ -59,7 +57,6 @@ def test_quote_id_is_stable_across_pages():
             page_title="Stanford commencement address",
             page_type="theme",
             page_id=11,
-            revision_id=21,
         )
     )
 
@@ -68,7 +65,7 @@ def test_quote_id_is_stable_across_pages():
     assert len(first.quote_id) == 64
 
 
-def test_page_and_revision_ids_are_preserved(tmp_path):
+def test_streamed_rows_include_only_graph_fields(tmp_path):
     xml_path = tmp_path / "wikiquote.xml"
     xml_path.write_text(
         """<mediawiki>
@@ -84,8 +81,14 @@ def test_page_and_revision_ids_are_preserved(tmp_path):
 
     rows = list(MWParserQuoteExtractor().iter_wikiquote_xml(str(xml_path)))
 
-    assert rows[0]["page_id"] == 42
-    assert rows[0]["revision_id"] == 84
+    assert set(rows[0]) == {
+        "quote",
+        "author",
+        "page_title",
+        "quote_type",
+        "quote_id",
+        "attribution_id",
+    }
 
 
 def test_xml_extraction_returns_an_iterator(tmp_path):
@@ -160,7 +163,7 @@ def test_validation_is_deliberately_small():
 def test_real_page_structure_keeps_page_identity(
     title, wikitext, page_type, author, work
 ):
-    rows = MWParserQuoteExtractor().extract_page(title, 1, 2, wikitext)
+    rows = MWParserQuoteExtractor().extract_page(title, 1, wikitext)
 
     assert rows
     assert rows[0].page_type == page_type

@@ -17,16 +17,8 @@ SCHEMA_STATEMENTS = [
     FOR (a:Author) REQUIRE a.key IS UNIQUE
     """,
     """
-    CREATE CONSTRAINT work_key_unique IF NOT EXISTS
-    FOR (w:Work) REQUIRE w.key IS UNIQUE
-    """,
-    """
-    CREATE CONSTRAINT wikiquote_page_id_unique IF NOT EXISTS
-    FOR (p:WikiquotePage) REQUIRE p.id IS UNIQUE
-    """,
-    """
     CREATE FULLTEXT INDEX quote_text IF NOT EXISTS
-    FOR (q:Quote) ON EACH [q.text, q.normalized_text]
+    FOR (q:Quote) ON EACH [q.text]
     OPTIONS {indexConfig: {`fulltext.analyzer`: 'english'}}
     """,
     """

@@ -57,8 +57,15 @@ class HybridSearch:
             item = await asyncio.to_thread(self.repository.random_quote)
             return [item] if item else []
         if intent.kind == "quote_fragment":
-            return await asyncio.to_thread(
+            exact = await asyncio.to_thread(
                 self.repository.fragment_search,
+                intent.search_text,
+                intent.limit,
+            )
+            if exact:
+                return exact
+            return await asyncio.to_thread(
+                self.repository.relaxed_lexical_search,
                 intent.search_text,
                 intent.limit,
             )

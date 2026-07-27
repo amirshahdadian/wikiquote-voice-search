@@ -32,7 +32,7 @@ embeddings, conversational querying, and personalized text-to-speech.
 The implementation uses:
 
 - `mwparserfromhell` for MediaWiki markup;
-- Neo4j 5.26 for graph storage and search;
+- Neo4j 2026.06 for graph storage and search;
 - Gemini 3.5 Flash-Lite for intent classification;
 - Gemini Embedding 2 for 768-dimensional vectors;
 - `mlx-whisper` for speech recognition on Apple Silicon;
@@ -42,8 +42,9 @@ The implementation uses:
 
 ## 2. Data extraction
 
-`backend/app/cli/ingest.py` streams the XML dump with ElementTree. It preserves
-the Wikiquote page ID and revision ID for every extracted attribution.
+`backend/app/cli/ingest.py` streams the XML dump with ElementTree. Page IDs are
+used while deriving stable attribution IDs, but only fields used by the graph
+are emitted.
 
 The extractor trusts page structure:
 
@@ -66,36 +67,35 @@ share one `Quote`, while separate Wikiquote claims remain separate
 A 20-page golden fixture covers person, theme, literary work, film, disputed,
 about, malformed, and duplicate cases. Four more cases use structural markers
 from current raw pages for Albert Einstein, Maya Angelou, William Shakespeare,
-and Hamlet. The extractor is 525 lines. The prior file was 2,047 lines.
+and Hamlet. The extractor is 486 lines. The prior file was 2,047 lines.
 
 ## 3. Graph model
 
-The graph has five labels:
+The graph has three labels:
 
 ```text
 Quote
 Attribution
 Author
-Work
-WikiquotePage
 ```
 
-It has four relationship types:
+It has two relationship types:
 
 ```text
 (Quote)-[:HAS_ATTRIBUTION]->(Attribution)
 (Attribution)-[:ATTRIBUTED_TO]->(Author)
-(Attribution)-[:FROM_WORK]->(Work)
-(Attribution)-[:FOUND_ON]->(WikiquotePage)
 ```
 
-`Quote` contains `id`, `text`, `normalized_text`, `embedding`,
-`embedding_model`, and `embedding_dimensions`. Author, work, citation, page,
-and status are deliberately absent from the quote node. They describe a claim
-about a quotation, not the words themselves.
+`Quote` contains `id`, `text`, `search_text`, `embedding`, `embedding_model`,
+and `embedding_dimensions`. `Attribution` contains status, citation, work
+title, and Wikiquote page title. These fields describe a claim about a
+quotation, not the words themselves. `Author` remains a node because lookup by
+author is a core query. Work and page values are display metadata, so separate
+nodes and traversals would add structure without supporting another query.
 
-Neo4j constraints make the IDs and entity keys unique. Two full-text indexes
-cover quote text and author names. The vector index uses cosine similarity and
+Neo4j constraints make quote IDs, attribution IDs, and author keys unique. Two
+full-text indexes cover quote text and author names. A text index handles
+punctuation-insensitive fragments. The vector index uses cosine similarity and
 768 dimensions.
 
 Ingestion creates the schema and streams extracted rows from the XML dump
@@ -220,33 +220,17 @@ vectors, or model responses.
 
 ## 10. Evaluation
 
-The checked-in evaluation corpus contains:
-
-- 40 intent cases;
-- 50 exact quotation fragments;
-- 20 author queries;
-- 40 topic queries with reviewed acceptable quotations.
-
-The acceptance thresholds are 95 percent intent accuracy, 96 percent fragment
-recall at five, 95 percent author recall at five, and 85 percent topic recall at
-ten. Live tests require `RUN_LIVE_EVALUATION=1`, a Gemini key, and a populated
-Neo4j database. The ordinary test suite cannot make paid calls.
-
-A separate opt-in benchmark compares Gemini 3.5 Flash-Lite with Gemini 3.1
-Flash-Lite on the 40 intent cases. The configured model changes only if the
-cheaper candidate reaches 95 percent and does not lose the author and fragment
-distinctions.
-
-The offline suite currently passes. Live retrieval and model thresholds must be
-run after the replacement database is populated; this repository does not
-pretend that a skipped network test is a quality result.
+The offline suite covers extraction, fixed Cypher generation, rank fusion,
+workflow follow-ups, API mapping, users, ASR, speaker identification, and TTS.
+Live checks use reviewable requests against the imported dump: exact fragments,
+author lookup, topic lookup, random selection, attribution follow-up, and a
+recorded voice request. This avoids fixed expected quotations that may not
+exist in a newer `latest` Wikiquote dump.
 
 ## 11. Code reduction
 
-The deterministic extraction, search, and conversation group measured 4,027
-lines before the redesign. Its direct replacement is 1,591 lines, a reduction
-of about 61 percent. Production Python, TypeScript, TSX, and CSS across the
-repository fell from 11,924 to 6,454 lines, a reduction of about 46 percent.
+Production Python, TypeScript, TSX, and CSS across the repository fell from
+11,924 to 5,914 lines, a reduction of about 50 percent.
 Most of the removed code was heuristic classification,
 manual relevance scoring, duplicate endpoint logic, and compatibility code for
 the old graph.
@@ -257,15 +241,12 @@ fusion, workflow state, and HTTP mapping each have focused tests.
 
 ## 12. Cutover procedure
 
-The replacement graph must be built at a separate Neo4j URI. A 5,000-page slice
-is imported first, followed by embeddings, verification, live evaluation, and
-an application smoke test. The full dump is loaded only after that slice works.
+The current Neo4j Desktop graph contains 522,590 quotes, 556,853 attributions,
+and 47,062 authors. It has 953,857 relationships: 556,853
+`HAS_ATTRIBUTION` edges and 397,004 `ATTRIBUTED_TO` edges. Every attribution
+has a page title, all indexes are online, and integrity checks report no blank
+or orphan nodes. A stopped Docker volume preserves the pre-cutover graph.
 
-Once the full graph passes the same checks, the application can point to the
-new URI. The old Neo4j store stays unchanged for seven days. It is exported or
-backed up with standard Neo4j tooling before deletion.
-
-At the time of this report, the local checkout has no running Neo4j service and
-no Gemini API key. The code, offline tests, typecheck, and frontend production
-build can be verified locally. Database counts, paid model accuracy, and final
-cutover remain deployment steps and are reported as such.
+The remaining deployment step is the paid Gemini embedding backfill. Vector
+retrieval stays disabled until every quote has the configured model and 768
+dimensions; lexical, fragment, and author retrieval remain available.

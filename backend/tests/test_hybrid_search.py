@@ -25,6 +25,10 @@ class FakeRepository:
         self.calls.append("lexical")
         return [hit("shared", "lexical"), hit("lexical", "lexical")]
 
+    def relaxed_lexical_search(self, text, limit):
+        self.calls.append("relaxed")
+        return [hit("spoken-fragment", "lexical")]
+
     def vector_search(self, vector, limit):
         self.calls.append("vector")
         return [hit("vector", "vector"), hit("shared", "vector")]
@@ -128,6 +132,26 @@ def test_quote_fragment_uses_punctuation_insensitive_fragment_search():
 
     assert repository.calls == ["fragment"]
     assert gemini.calls == 0
+
+
+def test_quote_fragment_falls_back_to_relaxed_lexical_search():
+    repository = FakeRepository()
+    repository.fragment_search = lambda text, limit: (
+        repository.calls.append("fragment") or []
+    )
+    search = HybridSearch(repository, FakeGemini())
+
+    results = asyncio.run(
+        search.search(
+            SearchIntent(
+                kind="quote_fragment",
+                search_text="a long spoken quotation with one transcription difference",
+            )
+        )
+    )
+
+    assert results[0].quote_id == "spoken-fragment"
+    assert repository.calls == ["fragment", "relaxed"]
 
 
 def test_author_and_random_intents_use_fixed_repository_methods():

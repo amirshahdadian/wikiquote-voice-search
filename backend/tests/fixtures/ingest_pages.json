@@ -1,101 +1,101 @@
 [
   {
-    "title": "Albert Einstein", "page_id": 1, "revision_id": 101,
+    "title": "Albert Einstein", "page_id": 1,
     "wikitext": "[[Category:People]]\n== Quotes ==\n* Life is like riding a bicycle. To keep your balance, you must keep moving.\n** ''[[Ideas and Opinions]]'' (1954).",
     "expected": [{"quote": "Life is like riding a bicycle. To keep your balance, you must keep moving.", "author": "Albert Einstein", "work": "Ideas and Opinions", "page_title": "Albert Einstein", "page_type": "person", "citation": "Ideas and Opinions (1954).", "quote_type": "sourced"}]
   },
   {
-    "title": "Maya Angelou", "page_id": 2, "revision_id": 102,
+    "title": "Maya Angelou", "page_id": 2,
     "wikitext": "[[Category:People]]\n== Quotes ==\n* There is no greater agony than bearing an untold story inside you.",
     "expected": [{"quote": "There is no greater agony than bearing an untold story inside you.", "author": "Maya Angelou", "work": null, "page_title": "Maya Angelou", "page_type": "person", "citation": null, "quote_type": "sourced"}]
   },
   {
-    "title": "Oscar Wilde", "page_id": 3, "revision_id": 103,
+    "title": "Oscar Wilde", "page_id": 3,
     "wikitext": "[[Category:People]]\n{{quote|Be yourself; everyone else is already taken.|author=Oscar Wilde|source=[[Collected sayings]]}}",
     "expected": [{"quote": "Be yourself; everyone else is already taken.", "author": "Oscar Wilde", "work": "Collected sayings", "page_title": "Oscar Wilde", "page_type": "person", "citation": "Collected sayings", "quote_type": "sourced"}]
   },
   {
-    "title": "Franklin D. Roosevelt", "page_id": 4, "revision_id": 104,
+    "title": "Franklin D. Roosevelt", "page_id": 4,
     "wikitext": "[[Category:People]]\n== Speeches ==\n<blockquote>The only thing we have to fear is fear itself.</blockquote>",
     "expected": [{"quote": "The only thing we have to fear is fear itself.", "author": "Franklin D. Roosevelt", "work": null, "page_title": "Franklin D. Roosevelt", "page_type": "person", "citation": null, "quote_type": "sourced"}]
   },
   {
-    "title": "Edsger W. Dijkstra", "page_id": 5, "revision_id": 105,
+    "title": "Edsger W. Dijkstra", "page_id": 5,
     "wikitext": "[[Category:People]]\n== Quotes ==\n* Simplicity is prerequisite for reliability.\n* Simplicity is prerequisite for reliability.",
     "expected": [{"quote": "Simplicity is prerequisite for reliability.", "author": "Edsger W. Dijkstra", "work": null, "page_title": "Edsger W. Dijkstra", "page_type": "person", "citation": null, "quote_type": "sourced"}]
   },
   {
-    "title": "Love", "page_id": 6, "revision_id": 106,
+    "title": "Love", "page_id": 6,
     "wikitext": "== Quotes ==\n* Where there is love there is life.\n** [[Mahatma Gandhi]], ''[[Young India]]''.",
     "expected": [{"quote": "Where there is love there is life.", "author": "Mahatma Gandhi", "work": "Young India", "page_title": "Love", "page_type": "theme", "citation": "Mahatma Gandhi, Young India.", "quote_type": "sourced"}]
   },
   {
-    "title": "Courage", "page_id": 7, "revision_id": 107,
+    "title": "Courage", "page_id": 7,
     "wikitext": "{{quote|Courage is resistance to fear, mastery of fear, not absence of fear.|author=[[Mark Twain]]|source=[[Pudd'nhead Wilson]]}}",
     "expected": [{"quote": "Courage is resistance to fear, mastery of fear, not absence of fear.", "author": "Mark Twain", "work": "Pudd'nhead Wilson", "page_title": "Courage", "page_type": "theme", "citation": "Pudd'nhead Wilson", "quote_type": "sourced"}]
   },
   {
-    "title": "Freedom", "page_id": 8, "revision_id": 108,
+    "title": "Freedom", "page_id": 8,
     "wikitext": "== Quotes ==\n* Freedom lies in being bold enough to choose your own path.\n** [[Robert Frost]], ''[[Collected Poems]]''.",
     "expected": [{"quote": "Freedom lies in being bold enough to choose your own path.", "author": "Robert Frost", "work": "Collected Poems", "page_title": "Freedom", "page_type": "theme", "citation": "Robert Frost, Collected Poems.", "quote_type": "sourced"}]
   },
   {
-    "title": "Wisdom", "page_id": 9, "revision_id": 109,
+    "title": "Wisdom", "page_id": 9,
     "wikitext": "{{cquote|The only true wisdom is in knowing you know nothing.|author=[[Socrates]]}}",
     "expected": [{"quote": "The only true wisdom is in knowing you know nothing.", "author": "Socrates", "work": null, "page_title": "Wisdom", "page_type": "theme", "citation": null, "quote_type": "sourced"}]
   },
   {
-    "title": "Hope", "page_id": 10, "revision_id": 110,
+    "title": "Hope", "page_id": 10,
     "wikitext": "== Attributed ==\n* Hope is a waking dream that carries us through darkness.\n** [[Aristotle]].",
     "expected": [{"quote": "Hope is a waking dream that carries us through darkness.", "author": "Aristotle", "work": null, "page_title": "Hope", "page_type": "theme", "citation": "Aristotle.", "quote_type": "attributed"}]
   },
   {
-    "title": "Hamlet", "page_id": 11, "revision_id": 111,
+    "title": "Hamlet", "page_id": 11,
     "wikitext": "[[Category:Literary works]]\n{{quote|This above all: to thine own self be true.|author=[[William Shakespeare]]|source=[[Hamlet]]}}",
     "expected": [{"quote": "This above all: to thine own self be true.", "author": "William Shakespeare", "work": "Hamlet", "page_title": "Hamlet", "page_type": "literary_work", "citation": "Hamlet", "quote_type": "sourced"}]
   },
   {
-    "title": "Pride and Prejudice", "page_id": 12, "revision_id": 112,
+    "title": "Pride and Prejudice", "page_id": 12,
     "wikitext": "[[Category:Literary works]]\n{{quote|I could easily forgive his pride, if he had not mortified mine.|author=[[Jane Austen]]|source=[[Pride and Prejudice]]}}",
     "expected": [{"quote": "I could easily forgive his pride, if he had not mortified mine.", "author": "Jane Austen", "work": "Pride and Prejudice", "page_title": "Pride and Prejudice", "page_type": "literary_work", "citation": "Pride and Prejudice", "quote_type": "sourced"}]
   },
   {
-    "title": "Tao Te Ching", "page_id": 13, "revision_id": 113,
+    "title": "Tao Te Ching", "page_id": 13,
     "wikitext": "[[Category:Literary works]]\n== Text ==\n* A journey of a thousand miles begins beneath one's feet.\n** [[Laozi]], ''[[Tao Te Ching]]''.",
     "expected": [{"quote": "A journey of a thousand miles begins beneath one's feet.", "author": "Laozi", "work": "Tao Te Ching", "page_title": "Tao Te Ching", "page_type": "literary_work", "citation": "Laozi, Tao Te Ching.", "quote_type": "sourced"}]
   },
   {
-    "title": "Nineteen Eighty-Four", "page_id": 14, "revision_id": 114,
+    "title": "Nineteen Eighty-Four", "page_id": 14,
     "wikitext": "[[Category:Literary works]]\n{{quotation|Freedom is the freedom to say that two plus two make four.|author=[[George Orwell]]|title=[[Nineteen Eighty-Four]]}}",
     "expected": [{"quote": "Freedom is the freedom to say that two plus two make four.", "author": "George Orwell", "work": "Nineteen Eighty-Four", "page_title": "Nineteen Eighty-Four", "page_type": "literary_work", "citation": "Nineteen Eighty-Four", "quote_type": "sourced"}]
   },
   {
-    "title": "Star Wars", "page_id": 15, "revision_id": 115,
+    "title": "Star Wars", "page_id": 15,
     "wikitext": "[[Category:Films]]\n== Taglines ==\n* A long time ago in a galaxy far, far away.",
     "expected": [{"quote": "A long time ago in a galaxy far, far away.", "author": null, "work": "Star Wars", "page_title": "Star Wars", "page_type": "film", "citation": null, "quote_type": "sourced"}]
   },
   {
-    "title": "The Matrix", "page_id": 16, "revision_id": 116,
+    "title": "The Matrix", "page_id": 16,
     "wikitext": "[[Category:Films]]\n{{quote|There is a difference between knowing the path and walking the path.|source=[[The Matrix]]}}",
     "expected": [{"quote": "There is a difference between knowing the path and walking the path.", "author": null, "work": "The Matrix", "page_title": "The Matrix", "page_type": "film", "citation": "The Matrix", "quote_type": "sourced"}]
   },
   {
-    "title": "Casablanca", "page_id": 17, "revision_id": 117,
+    "title": "Casablanca", "page_id": 17,
     "wikitext": "[[Category:Films]]\n== Taglines ==\n* They had a date with fate in Casablanca.",
     "expected": [{"quote": "They had a date with fate in Casablanca.", "author": null, "work": "Casablanca", "page_title": "Casablanca", "page_type": "film", "citation": null, "quote_type": "sourced"}]
   },
   {
-    "title": "Contested words", "page_id": 18, "revision_id": 118,
+    "title": "Contested words", "page_id": 18,
     "wikitext": "== Disputed ==\n* History is a set of lies agreed upon by everyone.\n** [[Napoleon Bonaparte]].",
     "expected": [{"quote": "History is a set of lies agreed upon by everyone.", "author": "Napoleon Bonaparte", "work": null, "page_title": "Contested words", "page_type": "theme", "citation": "Napoleon Bonaparte.", "quote_type": "disputed"}]
   },
   {
-    "title": "About Ada Lovelace", "page_id": 19, "revision_id": 119,
+    "title": "About Ada Lovelace", "page_id": 19,
     "wikitext": "== Quotes about Ada Lovelace ==\n* Her imagination was the discoverer, her mathematical powers the instrument.\n** [[Augustus De Morgan]].",
     "expected": [{"quote": "Her imagination was the discoverer, her mathematical powers the instrument.", "author": "Augustus De Morgan", "work": null, "page_title": "About Ada Lovelace", "page_type": "theme", "citation": "Augustus De Morgan.", "quote_type": "about"}]
   },
   {
-    "title": "Malformed", "page_id": 20, "revision_id": 120,
+    "title": "Malformed", "page_id": 20,
     "wikitext": "== Quotes ==\n* Too short.\n* 1234567890 1234567890 1234567890\n{{quote|}}",
     "expected": []
   }

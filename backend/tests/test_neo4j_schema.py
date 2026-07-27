@@ -86,13 +86,14 @@ class IndexDriver:
 def test_schema_has_only_explainable_constraints_and_indexes():
     joined = "\n".join(SCHEMA_STATEMENTS)
 
-    assert "QuoteOccurrence" not in joined
-    assert "PrimaryQuote" not in joined
-    assert "search_tier" not in joined
     assert "quote_id_unique" in joined
     assert "attribution_id_unique" in joined
+    assert "author_key_unique" in joined
+    assert "work_key_unique" not in joined
+    assert "wikiquote_page_id_unique" not in joined
     assert "quote_embedding" in joined
     assert "quote_search_text" in joined
+    assert "q.normalized_text" not in joined
     assert "`vector.dimensions`: 768" in joined
     assert "`vector.similarity_function`: 'cosine'" in joined
 
@@ -105,7 +106,7 @@ def test_ensure_schema_executes_every_statement_once():
     assert [query for query, _ in session.calls] == SCHEMA_STATEMENTS
 
 
-def test_loader_keeps_provenance_on_attribution_not_quote():
+def test_loader_stores_display_provenance_on_attribution():
     driver = RecordingDriver()
     repository = Neo4jQuoteRepository(driver=driver)
     row = {
@@ -129,11 +130,27 @@ def test_loader_keeps_provenance_on_attribution_not_quote():
     assert "MERGE (q:Quote {id: row.quote_id})" in query
     assert "MERGE (a:Attribution {id: row.attribution_id})" in query
     assert "MERGE (q)-[:HAS_ATTRIBUTION]->(a)" in query
-    assert "MERGE (a)-[:FOUND_ON]->(p)" in query
-    assert "q.primary_author" not in query
+    assert "a.work_title = row.work_title" in query
+    assert "a.page_title = row.page_title" in query
+    assert "Work" not in query
+    assert "WikiquotePage" not in query
+    assert "FOUND_ON" not in query
+    assert "FROM_WORK" not in query
+    assert "q.normalized_text" not in query
     assert parameters["rows"][0]["author_key"]
-    assert parameters["rows"][0]["work_key"]
     assert parameters["rows"][0]["search_text"] == "a sufficiently long quotation"
+    assert set(parameters["rows"][0]) == {
+        "quote_id",
+        "attribution_id",
+        "quote",
+        "search_text",
+        "quote_type",
+        "citation",
+        "author_key",
+        "author_name",
+        "work_title",
+        "page_title",
+    }
 
 
 def test_maintenance_cli_has_explicit_graph_commands():
@@ -151,27 +168,34 @@ def test_runtime_search_uses_only_fixed_semantic_index_queries():
     repository = Neo4jQuoteRepository(driver=driver)
 
     assert repository.lexical_search("hope + courage", 5) == []
+    assert repository.relaxed_lexical_search("hope courage", 5) == []
     assert repository.vector_search([0.0] * 768, 5) == []
     assert repository.fragment_search("to be, or not to be", 5) == []
     assert repository.author_search("Virginia Woolf", 5) == []
     assert repository.autocomplete("to be", 5) == []
 
-    lexical, vector, fragment, author, autocomplete = [
+    lexical, relaxed, vector, fragment, author, autocomplete = [
         query for query, _ in driver.session_instance.calls
     ]
     assert "db.index.fulltext.queryNodes('quote_text'" in lexical
+    assert "db.index.fulltext.queryNodes('quote_text'" in relaxed
+    assert driver.session_instance.calls[1][1]["query"] == "hope OR courage"
     assert "VECTOR INDEX quote_embedding" in vector
     assert "SCORE AS score" in vector
     assert "db.index.vector.queryNodes" not in vector
     assert "q.search_text CONTAINS $search_text" in fragment
     assert "db.index.fulltext.queryNodes('author_name'" in author
     assert "q.search_text CONTAINS $search_text" in autocomplete
-    assert all("HAS_ATTRIBUTION" in query for query in (lexical, vector, fragment, author, autocomplete))
+    assert all("HAS_ATTRIBUTION" in query for query in (lexical, relaxed, vector, fragment, author, autocomplete))
     assert "matched_author.name AS author_name" in author
     assert "matched_attribution.citation AS citation" in author
+    assert "matched_attribution.work_title AS work_title" in author
+    assert "matched_attribution.page_title AS page_title" in author
+    assert all("FOUND_ON" not in query for query in (lexical, relaxed, vector, fragment, author, autocomplete))
+    assert all("FROM_WORK" not in query for query in (lexical, relaxed, vector, fragment, author, autocomplete))
     assert "CALL (q)" in lexical
     assert "CALL (q, matched_author)" in author
-    assert all("CALL {\n  WITH" not in query for query in (lexical, vector, author, autocomplete))
+    assert all("CALL {\n  WITH" not in query for query in (lexical, relaxed, vector, author, autocomplete))
 
 
 def test_verification_reports_current_graph_and_stale_embeddings():
@@ -183,8 +207,6 @@ def test_verification_reports_current_graph_and_stale_embeddings():
         "Quote",
         "Attribution",
         "Author",
-        "Work",
-        "WikiquotePage",
         "quotes_without_current_embedding",
     }
     assert counts["quotes_without_current_embedding"] == 2

@@ -16,48 +16,35 @@ LOAD_QUERY = """
 UNWIND $rows AS row
 MERGE (q:Quote {id: row.quote_id})
 SET q.text = row.quote,
-    q.normalized_text = row.normalized_quote,
     q.search_text = row.search_text
 MERGE (a:Attribution {id: row.attribution_id})
 SET a.status = row.quote_type,
     a.citation = row.citation,
-    a.locator = row.source_locator,
-    a.year = row.year,
-    a.section = row.context
-MERGE (p:WikiquotePage {id: row.page_id})
-SET p.title = row.page_title,
-    p.revision_id = row.revision_id,
-    p.page_type = row.page_type
+    a.work_title = row.work_title,
+    a.page_title = row.page_title
 MERGE (q)-[:HAS_ATTRIBUTION]->(a)
-MERGE (a)-[:FOUND_ON]->(p)
 FOREACH (_ IN CASE WHEN row.author_key IS NULL THEN [] ELSE [1] END |
   MERGE (author:Author {key: row.author_key})
   SET author.name = row.author_name
   MERGE (a)-[:ATTRIBUTED_TO]->(author)
 )
-FOREACH (_ IN CASE WHEN row.work_key IS NULL THEN [] ELSE [1] END |
-  MERGE (work:Work {key: row.work_key})
-  SET work.title = row.work_title
-  MERGE (a)-[:FROM_WORK]->(work)
-)
 """
 
 _ATTRIBUTION_SUBQUERY = """
 CALL (q) {
-  MATCH (q)-[:HAS_ATTRIBUTION]->(attribution:Attribution)-[:FOUND_ON]->(page:WikiquotePage)
+  MATCH (q)-[:HAS_ATTRIBUTION]->(attribution:Attribution)
   OPTIONAL MATCH (attribution)-[:ATTRIBUTED_TO]->(author:Author)
-  OPTIONAL MATCH (attribution)-[:FROM_WORK]->(work:Work)
-  WITH attribution, page, author, work
+  WITH attribution, author
   ORDER BY CASE attribution.status
     WHEN 'sourced' THEN 0
     WHEN 'attributed' THEN 1
     WHEN 'disputed' THEN 2
     ELSE 3
-  END, page.title
+  END, attribution.page_title
   RETURN author.name AS author_name,
-         work.title AS work_title,
+         attribution.work_title AS work_title,
          attribution.citation AS citation,
-         page.title AS page_title
+         attribution.page_title AS page_title
   LIMIT 1
 }
 """
@@ -118,19 +105,17 @@ WITH DISTINCT q, matched_author, score
 CALL (q, matched_author) {
   MATCH (q)-[:HAS_ATTRIBUTION]->(matched_attribution:Attribution)
         -[:ATTRIBUTED_TO]->(matched_author)
-  MATCH (matched_attribution)-[:FOUND_ON]->(matched_page:WikiquotePage)
-  OPTIONAL MATCH (matched_attribution)-[:FROM_WORK]->(matched_work:Work)
-  WITH matched_author, matched_attribution, matched_page, matched_work
+  WITH matched_author, matched_attribution
   ORDER BY CASE matched_attribution.status
     WHEN 'sourced' THEN 0
     WHEN 'attributed' THEN 1
     WHEN 'disputed' THEN 2
     ELSE 3
-  END, matched_page.title
+  END, matched_attribution.page_title
   RETURN matched_author.name AS author_name,
-         matched_work.title AS work_title,
+         matched_attribution.work_title AS work_title,
          matched_attribution.citation AS citation,
-         matched_page.title AS page_title
+         matched_attribution.page_title AS page_title
   LIMIT 1
 }
 RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
@@ -151,12 +136,12 @@ def _search_text(value: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", normalized).split())
 
 
-def _lucene_query(value: str) -> str:
+def _lucene_query(value: str, operator: str = "AND") -> str:
     cleaned = re.sub(r'[+\-!(){}\[\]^"~*?:\\/]', " ", value)
     terms = cleaned.split()
     if not terms:
         return '""'
-    return " AND ".join(terms)
+    return f" {operator} ".join(terms)
 
 
 class Neo4jQuoteRepository:
@@ -242,11 +227,7 @@ class Neo4jQuoteRepository:
             "quote_id",
             "attribution_id",
             "quote",
-            "normalized_quote",
-            "page_id",
-            "revision_id",
             "page_title",
-            "page_type",
             "quote_type",
         )
         missing = [field for field in required if row.get(field) is None]
@@ -258,20 +239,12 @@ class Neo4jQuoteRepository:
             "quote_id": row["quote_id"],
             "attribution_id": row["attribution_id"],
             "quote": row["quote"],
-            "normalized_quote": row["normalized_quote"],
             "search_text": _search_text(row["quote"]),
-            "page_id": str(row["page_id"]),
-            "revision_id": str(row["revision_id"]),
             "page_title": row["page_title"],
-            "page_type": row["page_type"],
             "quote_type": row["quote_type"],
             "citation": row.get("citation"),
-            "source_locator": row.get("source_locator"),
-            "year": row.get("year"),
-            "context": row.get("context"),
             "author_key": _entity_key(author),
             "author_name": author,
-            "work_key": _entity_key(work),
             "work_title": work,
         }
 
@@ -280,8 +253,6 @@ class Neo4jQuoteRepository:
             "Quote",
             "Attribution",
             "Author",
-            "Work",
-            "WikiquotePage",
         )
         counts: dict[str, int] = {}
         with self.driver.session() as session:
@@ -356,6 +327,15 @@ class Neo4jQuoteRepository:
             _LEXICAL_QUERY,
             search_type="lexical",
             query=_lucene_query(text),
+            candidate_limit=max(limit, 50),
+            limit=limit,
+        )
+
+    def relaxed_lexical_search(self, text: str, limit: int) -> list[QuoteHit]:
+        return self._query_hits(
+            _LEXICAL_QUERY,
+            search_type="lexical",
+            query=_lucene_query(text, "OR"),
             candidate_limit=max(limit, 50),
             limit=limit,
         )
