@@ -41,88 +41,25 @@ The implementation uses:
 
 ## 2. System architecture
 
-The runtime is one FastAPI process holding three services, with the model and
-the audio work sitting outside it.
-
-```mermaid
-flowchart TB
-    UI["<b>Browser</b> · Next.js<br/>typing, microphone, playback"]
-
-    ASR["mlx-whisper<br/><i>speech to text</i>"]
-    SPK["resemblyzer<br/><i>identifies the speaker</i>"]
-
-    subgraph api["FastAPI process"]
-        direction TB
-        CONV["<b>ConversationService</b><br/>resolves the user, assembles the reply"]
-        WF["<b>QueryWorkflow</b><br/>conversation state, follow-ups"]
-        SEARCH["<b>QuoteSearch</b> and repository<br/>one intent, one fixed Cypher query"]
-        CONV --> WF --> SEARCH
-    end
-
-    SQL[("SQLite<br/>profiles, voice settings")]
-    GEM["<b>Gemini 3.5 Flash-Lite</b><br/>one call per request"]
-    NEO[("<b>Neo4j</b><br/>quotations, claims, authors")]
-    TTS["kokoro-onnx<br/><i>text to speech</i>"]
-    WAV[("generated audio<br/>served by /api/audio")]
-
-    UI -->|"spoken"| ASR
-    UI -->|"spoken"| SPK
-    UI -->|"typed"| CONV
-    ASR -->|"transcript"| CONV
-    SPK -->|"user id"| CONV
-    WF -->|"request in, typed intent out"| GEM
-    SEARCH -->|"reads"| NEO
-    CONV -->|"reply text"| TTS
-    SQL -->|"which voice"| TTS
-    TTS --> WAV
-
-    classDef store fill:#eaf5ec,stroke:#3f7a55,color:#17351f
-    classDef ext fill:#fdf0e3,stroke:#b5762a,color:#5a3a12
-    classDef local fill:#e9ecfa,stroke:#5560a8,color:#22285c
-    class NEO,SQL,WAV store
-    class GEM ext
-    class ASR,SPK,TTS local
-```
-
-Building the graph is a separate pipeline that runs once, and nothing at request
-time writes to Neo4j:
-
-```mermaid
-flowchart LR
-    XML["Wikiquote XML dump"] --> ING["ingest.py"] --> NEO[("Neo4j")]
-```
+The browser handles typing, the microphone, and playback. `ConversationService`
+resolves the user and assembles the reply, `QueryWorkflow` keeps conversation
+state and answers follow-ups from it, and `QuoteSearch` sends one intent to one
+fixed Cypher query. Speech recognition, speaker matching, and synthesis run on
+the machine, so no audio leaves it. Gemini is the only network call. Neo4j holds
+the graph, SQLite holds profiles and voice settings, and generated audio is
+written to disk.
 
 The container holds one Gemini client and one Neo4j driver for the life of the
 process, and closes both at shutdown. Typed and spoken requests meet at
 `ConversationService`, so the two cannot drift into separate search behaviour.
+Building the graph is a separate pipeline that runs once, and nothing at request
+time writes to Neo4j.
 
-A single request moves through these stages:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User
-    participant API as FastAPI
-    participant V as Audio models
-    participant G as Gemini
-    participant N as Neo4j
-
-    User->>API: "wat did einstien sya about imaganation"
-    opt spoken request
-        API->>V: transcribe, then match the speaker
-        V-->>API: transcript and user id
-    end
-    API->>G: this request, plus the last two for pronouns
-    G-->>API: kind=topic, terms="imagination knowledge", author="Einstein"
-    alt points at the previous answer
-        API->>API: reuse the stored result
-    else new subject
-        API->>N: one fixed query
-        N-->>API: ranked quotations, one per speaker
-    end
-    API->>V: synthesise in the recognised user's voice
-    API-->>User: quotation, author, page, audio
-```
+A request moves through five stages. A spoken one is transcribed and its
+speaker matched. The text and the previous two requests go to Gemini, which
+returns the typed intent. A follow-up is answered from stored state, and
+anything else runs one fixed query. The reply is synthesised in the recognised
+user's voice. The quotation, its source, and the audio link return together.
 
 ## 3. Data extraction
 
@@ -141,8 +78,8 @@ The extractor trusts page structure:
 It excludes non-content namespaces, redirects, reference sections, and the cast
 and character lists of film and play pages, whose bullets otherwise parse as
 quotations: 37,169 rows of the form "Actor - Character" were removed from an
-earlier import. It
-checks quote length, word count, and alphabetic character ratio. It does not
+earlier import. It checks quote length, word count, and alphabetic character
+ratio. It does not
 guess whether arbitrary introductory prose names a person, infer authors from
 geography, or maintain an English-language blacklist of sentence patterns.
 
@@ -158,29 +95,11 @@ and Hamlet. The extractor is 487 lines. The prior file was 2,047 lines.
 
 ## 4. Graph model
 
-```mermaid
-erDiagram
-    QUOTE ||--|{ ATTRIBUTION : "HAS_ATTRIBUTION"
-    ATTRIBUTION }o--o| AUTHOR : "ATTRIBUTED_TO"
-
-    QUOTE {
-        string id "sha256 of the normalised words"
-        string text
-        string search_text
-    }
-    ATTRIBUTION {
-        string status
-        int status_rank
-        string citation
-        string work_title
-        string page_title
-    }
-    AUTHOR {
-        string key
-        string name
-        int quote_count
-    }
+```text
+(Quote)-[:HAS_ATTRIBUTION]->(Attribution)-[:ATTRIBUTED_TO]->(Author)
 ```
+
+The last edge is optional, because 22 percent of claims name no author.
 
 `Quote` contains `id`, `text`, and `search_text`. `Attribution` contains status,
 its stored preference rank, citation, work title, and Wikiquote page title.

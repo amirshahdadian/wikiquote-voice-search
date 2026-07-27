@@ -17,95 +17,35 @@ attribution on screen comes out of the graph.
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    UI["<b>Browser</b> · Next.js<br/>typing, microphone, playback"]
+The browser is a Next.js page that handles typing, the microphone, and playback.
+It talks to one FastAPI process holding three services. `ConversationService`
+works out who is speaking and assembles the reply. `QueryWorkflow` keeps the
+conversation state and answers follow-ups from what it already stored.
+`QuoteSearch` turns one intent into one fixed Cypher query.
 
-    ASR["mlx-whisper<br/><i>speech to text</i>"]
-    SPK["resemblyzer<br/><i>identifies the speaker</i>"]
-
-    subgraph api["FastAPI process"]
-        direction TB
-        CONV["<b>ConversationService</b><br/>resolves the user, assembles the reply"]
-        WF["<b>QueryWorkflow</b><br/>conversation state, follow-ups"]
-        SEARCH["<b>QuoteSearch</b> and repository<br/>one intent, one fixed Cypher query"]
-        CONV --> WF --> SEARCH
-    end
-
-    SQL[("SQLite<br/>profiles, voice settings")]
-    GEM["<b>Gemini 3.5 Flash-Lite</b><br/>one call per request"]
-    NEO[("<b>Neo4j</b><br/>quotations, claims, authors")]
-    TTS["kokoro-onnx<br/><i>text to speech</i>"]
-    WAV[("generated audio<br/>served by /api/audio")]
-
-    UI -->|"spoken"| ASR
-    UI -->|"spoken"| SPK
-    UI -->|"typed"| CONV
-    ASR -->|"transcript"| CONV
-    SPK -->|"user id"| CONV
-    WF -->|"request in, typed intent out"| GEM
-    SEARCH -->|"reads"| NEO
-    CONV -->|"reply text"| TTS
-    SQL -->|"which voice"| TTS
-    TTS --> WAV
-
-    classDef store fill:#eaf5ec,stroke:#3f7a55,color:#17351f
-    classDef ext fill:#fdf0e3,stroke:#b5762a,color:#5a3a12
-    classDef local fill:#e9ecfa,stroke:#5560a8,color:#22285c
-    class NEO,SQL,WAV store
-    class GEM ext
-    class ASR,SPK,TTS local
-```
-
-The reply text, the source, and a link to the audio go back to the browser.
+Three models run on the machine itself, so no audio leaves it: `mlx-whisper`
+transcribes, `resemblyzer` matches the speaker against enrolled vectors, and
+`kokoro-onnx` reads the answer back. Gemini is the only network call. Neo4j
+holds the quotations, SQLite holds the profiles and voice settings, and
+generated audio is written to disk and served from `/api/audio`.
 
 Building the graph is a separate pipeline that runs once. Nothing at request
 time writes to Neo4j.
 
-```mermaid
-flowchart LR
-    XML["Wikiquote XML dump<br/>706 MB"] --> ING["ingest.py<br/><i>streams pages, keeps structure</i>"]
-    ING --> NEO[("Neo4j<br/>485,421 quotations")]
-    ING -->|"counts each author's quotations"| NEO
-```
-
 ## What happens on one request
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User
-    participant Web as Next.js
-    participant API as FastAPI
-    participant Voice as Audio models
-    participant LLM as Gemini
-    participant DB as Neo4j
-
-    User->>Web: speaks or types<br/>"wat did einstien sya about imaganation"
-    Web->>API: POST /api/chat/query or /api/voice/query
-
-    opt spoken
-        API->>Voice: transcribe
-        Voice-->>API: "what did Einstein say about imagination"
-        API->>Voice: match the speaker vector
-        Voice-->>API: Amir, 0.89 confident
-    end
-
-    API->>LLM: the request, plus the last two for pronouns
-    LLM-->>API: kind=topic, terms="imagination knowledge", author="Einstein"
-
-    alt refers to the previous answer
-        API->>API: reuse the stored result, no search
-    else new subject
-        API->>DB: one fixed Cypher query
-        DB-->>API: quotations, ranked and one per speaker
-    end
-
-    API->>Voice: read the answer in Amir's voice
-    Voice-->>API: wav file
-    API-->>Web: quotation, author, page, audio link
-    Web-->>User: shows the card and plays it
-```
+1. The browser posts the request to `/api/chat/query`, or the audio to
+   `/api/voice/query`.
+2. A spoken request is transcribed, and the speaker vector is matched against
+   the enrolled users.
+3. The text goes to Gemini with the previous two requests, which are there only
+   so that words like "he" and "that" can be resolved. Gemini returns the
+   intent: which search, which terms, and a name if one was given.
+4. A request pointing at the previous answer is served from stored state
+   without touching the database. Anything else runs one fixed Cypher query.
+5. The reply is read aloud in the recognised user's voice, and the quotation,
+   its author, its Wikiquote page, and a link to the audio go back to the
+   browser.
 
 ## How a request is routed
 
@@ -125,29 +65,17 @@ costs nothing and returns instantly.
 
 ## The graph
 
-```mermaid
-erDiagram
-    QUOTE ||--|{ ATTRIBUTION : "HAS_ATTRIBUTION"
-    ATTRIBUTION }o--o| AUTHOR : "ATTRIBUTED_TO"
-
-    QUOTE {
-        string id "sha256 of the normalised words"
-        string text
-        string search_text "for substring matching"
-    }
-    ATTRIBUTION {
-        string status "sourced, attributed, disputed, about"
-        int status_rank "0 to 3, orders competing claims"
-        string citation
-        string work_title
-        string page_title
-    }
-    AUTHOR {
-        string key "the collapsed lower-case name"
-        string name
-        int quote_count "weights the text score"
-    }
+```text
+(Quote)-[:HAS_ATTRIBUTION]->(Attribution)-[:ATTRIBUTED_TO]->(Author)
 ```
+
+`Quote` holds the words, a SHA-256 of the normalised text as its id, and a
+punctuation-free copy for substring matching. `Attribution` holds one claim
+about those words: its status, the rank that orders competing claims, the
+citation, the work title, and the Wikiquote page. `Author` holds the name, a
+collapsed lower-case key, and the number of quotations that author has, which
+is what weights the text score. An attribution does not always name an author,
+so that edge is optional.
 
 The same words can be claimed by different sources, which is why the claim is
 its own node: 27,884 quotations carry more than one. `Author` stays a node
