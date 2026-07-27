@@ -1,94 +1,41 @@
-# Large data files
-enwikiquote-*.xml
-extracted_quotes.json
-*.xml.bz2
-
-# Environment and secrets
+# Local configuration and secrets
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-*.pyc
+.venv/
+*.egg-info/
 build/
 dist/
-*.egg-info/
-.Python
 .pytest_cache/
-.mypy_cache/
 .coverage
 htmlcov/
 
-# Virtual environments
-venv/
-env/
-ENV/
-.venv/
-*.venv
-
-# Jupyter Notebooks
-.ipynb_checkpoints/
-*.ipynb
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# Audio recordings (keep structure, ignore files)
-data/recordings/*.wav
-data/recordings/*.mp3
-data/recordings/*.m4a
-
-# Speaker embeddings (keep structure, ignore files)
-data/embeddings/*.pkl
-
-# Temporary files
-*.tmp
-*.bak
-*.backup
-*.swp
-*.swo
-*~
-
-# IDE
-.vscode/
-.idea/
-*.sublime-*
-.vscode/settings.json
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-Desktop.ini
-
-# Streamlit
-.streamlit/
-
-# Next.js
+# Frontend
 frontend/node_modules/
 frontend/.next/
 frontend/coverage/
 frontend/*.tsbuildinfo
 
-# Neo4j
+# Runtime and generated data
+artifacts/
+data/
 neo4j/
-
-# Local Git worktrees
-.worktrees/
-
-# Generated API audio
-data/api_audio/
-
-# Generated design exports
-stitch_exports/
+enwikiquote-*.xml
+*.xml.bz2
+extracted_quotes.json
 REPORT.pdf
+
+# Local work and tools
+docs/
+.worktrees/
+.vscode/
+.idea/
+.DS_Store
+*.tmp
+*.swp
+*~
