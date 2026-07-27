@@ -78,6 +78,31 @@ class StubContainer:
         return None
 
 
+def test_public_route_table_is_stable():
+    paths = create_app(container=StubContainer()).openapi()["paths"]
+    routes = {
+        (method.upper(), path)
+        for path, operations in paths.items()
+        for method in operations
+        if path.startswith("/api/")
+    }
+
+    assert routes == {
+        ("DELETE", "/api/users/{user_id}"),
+        ("GET", "/api/audio/{audio_id}"),
+        ("GET", "/api/health"),
+        ("GET", "/api/quotes/autocomplete"),
+        ("GET", "/api/quotes/search"),
+        ("GET", "/api/users"),
+        ("GET", "/api/users/{user_id}"),
+        ("POST", "/api/chat/query"),
+        ("POST", "/api/tts/preview"),
+        ("POST", "/api/users/register"),
+        ("POST", "/api/users/{user_id}/re-enroll"),
+        ("POST", "/api/voice/query"),
+    }
+
+
 def test_health_endpoint():
     with TestClient(create_app(container=StubContainer())) as client:
         response = client.get("/api/health")
