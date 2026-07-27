@@ -4,7 +4,7 @@ import logging
 import sys
 from types import SimpleNamespace
 
-from backend.app.integrations.audio.asr import ASRService
+from backend.voice import ASRService
 
 
 def test_transcription_is_not_rewritten_or_logged(monkeypatch, caplog):

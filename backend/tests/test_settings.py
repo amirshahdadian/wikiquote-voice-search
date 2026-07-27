@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.app.core.settings import Settings
+from backend.config import Settings
 
 
 def test_gemini_defaults_are_stable_and_small():

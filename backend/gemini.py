@@ -6,11 +6,12 @@ import os
 import tempfile
 from time import perf_counter
 from typing import Any
-
 from google.genai import types
+from backend.models import SearchIntent
+from backend.config import log_model_event
 
-from backend.app.domain import SearchIntent
-from backend.app.core.logging import log_model_event
+
+# Gemini
 
 logger = logging.getLogger(__name__)
 

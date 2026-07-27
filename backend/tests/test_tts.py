@@ -3,8 +3,8 @@ import logging
 import numpy as np
 import pytest
 
-from backend.app.integrations.audio import tts as tts_module
-from backend.app.integrations.audio.tts import TTSService
+import backend.voice as tts_module
+from backend.voice import TTSService
 
 
 class FakeKokoro:

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 pytest.importorskip("multipart")
 
-from backend.app.main import create_app
+from backend.app import create_app
 
 
 class StubQuoteSearch:

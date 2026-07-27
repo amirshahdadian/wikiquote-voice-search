@@ -122,9 +122,9 @@ Use an empty Neo4j database. Ingestion creates the schema and streams extracted
 rows from the XML dump directly into Neo4j in batches.
 
 ```bash
-python -m backend.app.cli.ingest
-python -m backend.app.cli.maintenance embed
-python -m backend.app.cli.maintenance verify
+python -m backend.ingest
+python -m backend.maintenance embed
+python -m backend.maintenance verify
 ```
 
 The maintenance commands are:
@@ -141,8 +141,8 @@ removes the state file. It does not submit another job while one is active.
 For a small validation load:
 
 ```bash
-PARSE_PAGE_LIMIT=5000 python -m backend.app.cli.ingest
-python -m backend.app.cli.maintenance embed
+PARSE_PAGE_LIMIT=5000 python -m backend.ingest
+python -m backend.maintenance embed
 ```
 
 After import, `verify` should report nonzero counts for `Quote`,
@@ -154,7 +154,7 @@ After import, `verify` should report nonzero counts for `Quote`,
 Start the backend:
 
 ```bash
-uvicorn backend.app.main:app --reload
+uvicorn backend.app:app --reload
 ```
 
 Start the frontend in another shell:
@@ -193,11 +193,14 @@ Neo4j tools before removing it.
 
 ## Project files
 
-- `backend/app/cli/ingest.py`: structural Wikiquote extraction
-- `backend/app/cli/maintenance.py`: schema, load, embedding, and verification
-- `backend/app/integrations/neo4j_repository.py`: fixed graph queries
-- `backend/app/integrations/gemini.py`: typed Gemini boundary
-- `backend/app/services/query_workflow.py`: bounded conversation workflow
+- `backend/app.py`: FastAPI application and routes
+- `backend/search.py`: retrieval and conversation workflow
+- `backend/neo4j.py`: graph schema and fixed queries
+- `backend/gemini.py`: typed Gemini boundary
+- `backend/voice.py`: speech recognition, speaker matching, and synthesis
+- `backend/users.py`: SQLite user profiles
+- `backend/ingest.py`: structural Wikiquote extraction
+- `backend/maintenance.py`: schema, embedding, and verification commands
 - `frontend/components/main-shell.tsx`: main text and voice interface
 - `REPORT.md`: design and evaluation report
 

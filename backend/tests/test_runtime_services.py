@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.app.container import AppContainer
-from backend.app.domain import QuoteHit, SearchIntent
-from backend.app.core.settings import Settings
-from backend.app.services.conversation import ConversationService
-from backend.app.services.voice import VoiceService
+from backend.app import AppContainer
+from backend.models import QuoteHit, SearchIntent
+from backend.config import Settings
+from backend.search import ConversationService
+from backend.voice import VoiceService
 
 
 HIT = QuoteHit(

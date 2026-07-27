@@ -3,9 +3,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from backend.app.cli.maintenance import run_embedding_command
-from backend.app.integrations.gemini import GeminiService, prepare_document
-from backend.app.integrations.neo4j_repository import Neo4jQuoteRepository
+from backend.maintenance import run_embedding_command
+from backend.gemini import GeminiService, prepare_document
+from backend.neo4j import Neo4jQuoteRepository
 
 
 class FakeFiles:

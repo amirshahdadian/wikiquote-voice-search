@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.app.cli.ingest import ExtractedQuote, MWParserQuoteExtractor
+from backend.ingest import ExtractedQuote, MWParserQuoteExtractor
 
 
 CASES = json.loads(

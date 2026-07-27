@@ -1,6 +1,6 @@
 import sqlite3
 
-from backend.app.integrations.sqlite_users import (
+from backend.users import (
     delete_tts_preferences,
     delete_user_profile,
     get_tts_preferences,

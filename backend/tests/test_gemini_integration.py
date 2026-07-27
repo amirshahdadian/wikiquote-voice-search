@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.app.domain import SearchIntent
-from backend.app.integrations.gemini import (
+from backend.models import SearchIntent
+from backend.gemini import (
     GeminiService,
     GeminiUnavailable,
     prepare_document,

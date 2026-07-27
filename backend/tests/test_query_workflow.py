@@ -1,7 +1,7 @@
 import asyncio
 
-from backend.app.domain import QuoteHit, SearchIntent
-from backend.app.services.query_workflow import build_query_workflow
+from backend.models import QuoteHit, SearchIntent
+from backend.search import build_query_workflow
 
 
 class FakeGemini:

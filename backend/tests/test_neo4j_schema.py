@@ -2,9 +2,9 @@ from contextlib import contextmanager
 
 import pytest
 
-from backend.app.cli.maintenance import build_parser
-from backend.app.integrations.neo4j_repository import Neo4jQuoteRepository
-from backend.app.integrations.neo4j_schema import SCHEMA_STATEMENTS, ensure_schema
+from backend.maintenance import build_parser
+from backend.neo4j import Neo4jQuoteRepository
+from backend.neo4j import SCHEMA_STATEMENTS, ensure_schema
 
 
 class RecordingSession:

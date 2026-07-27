@@ -2,9 +2,9 @@ import asyncio
 
 import pytest
 
-from backend.app.domain import QuoteHit, SearchIntent
-from backend.app.integrations.gemini import GeminiUnavailable
-from backend.app.services.hybrid_search import HybridSearch, reciprocal_rank_fusion
+from backend.models import QuoteHit, SearchIntent
+from backend.gemini import GeminiUnavailable
+from backend.search import HybridSearch, reciprocal_rank_fusion
 
 
 def hit(quote_id: str, search_type: str = "test") -> QuoteHit:

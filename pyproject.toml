@@ -39,5 +39,5 @@ include = ["backend*"]
 testpaths = ["backend/tests", "frontend/tests"]
 
 [project.scripts]
-which-quote-ingest = "backend.app.cli.ingest:main"
-which-quote-maintenance = "backend.app.cli.maintenance:main"
+which-quote-ingest = "backend.ingest:main"
+which-quote-maintenance = "backend.maintenance:main"

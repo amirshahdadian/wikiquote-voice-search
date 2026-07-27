@@ -42,7 +42,7 @@ The implementation uses:
 
 ## 2. Data extraction
 
-`backend/app/cli/ingest.py` streams the XML dump with ElementTree. Page IDs are
+`backend/ingest.py` streams the XML dump with ElementTree. Page IDs are
 used while deriving stable attribution IDs, but only fields used by the graph
 are emitted.
 
@@ -102,9 +102,9 @@ Ingestion creates the schema and streams extracted rows from the XML dump
 directly into Neo4j. The maintenance CLI keeps three explicit commands:
 
 ```bash
-python -m backend.app.cli.maintenance schema
-python -m backend.app.cli.maintenance embed
-python -m backend.app.cli.maintenance verify
+python -m backend.maintenance schema
+python -m backend.maintenance embed
+python -m backend.maintenance verify
 ```
 
 The verification command reports current node counts and quotes with missing

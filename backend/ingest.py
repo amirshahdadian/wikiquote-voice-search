@@ -1,4 +1,3 @@
-"""Extract structurally marked quotations from a Wikiquote XML dump."""
 from __future__ import annotations
 
 import hashlib
@@ -10,12 +9,13 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
-
 import mwparserfromhell
+from backend.config import configure_logging
+from backend.config import settings
+from backend.neo4j import Neo4jQuoteRepository
 
-from backend.app.core.logging import configure_logging
-from backend.app.core.settings import settings
-from backend.app.integrations.neo4j_repository import Neo4jQuoteRepository
+
+# Ingest
 
 logger = logging.getLogger(__name__)
 

@@ -1,16 +1,59 @@
 from __future__ import annotations
 
+from typing import Any
 import hashlib
 import re
 import unicodedata
 from collections.abc import Iterable
-from typing import Any
-
 from neo4j import GraphDatabase
+from backend.models import QuoteHit
 
-from backend.app.domain import QuoteHit
-from backend.app.integrations.neo4j_schema import ensure_schema
 
+# Neo4J Schema
+
+SCHEMA_STATEMENTS = [
+    """
+    CREATE CONSTRAINT quote_id_unique IF NOT EXISTS
+    FOR (q:Quote) REQUIRE q.id IS UNIQUE
+    """,
+    """
+    CREATE CONSTRAINT attribution_id_unique IF NOT EXISTS
+    FOR (a:Attribution) REQUIRE a.id IS UNIQUE
+    """,
+    """
+    CREATE CONSTRAINT author_key_unique IF NOT EXISTS
+    FOR (a:Author) REQUIRE a.key IS UNIQUE
+    """,
+    """
+    CREATE FULLTEXT INDEX quote_text IF NOT EXISTS
+    FOR (q:Quote) ON EACH [q.text]
+    OPTIONS {indexConfig: {`fulltext.analyzer`: 'english'}}
+    """,
+    """
+    CREATE FULLTEXT INDEX author_name IF NOT EXISTS
+    FOR (a:Author) ON EACH [a.name]
+    """,
+    """
+    CREATE TEXT INDEX quote_search_text IF NOT EXISTS
+    FOR (q:Quote) ON (q.search_text)
+    """,
+    """
+    CREATE VECTOR INDEX quote_embedding IF NOT EXISTS
+    FOR (q:Quote) ON q.embedding
+    OPTIONS {indexConfig: {
+      `vector.dimensions`: 768,
+      `vector.similarity_function`: 'cosine'
+    }}
+    """,
+]
+
+
+def ensure_schema(session: Any) -> None:
+    for statement in SCHEMA_STATEMENTS:
+        session.run(statement)
+
+
+# Neo4J Repository
 
 LOAD_QUERY = """
 UNWIND $rows AS row

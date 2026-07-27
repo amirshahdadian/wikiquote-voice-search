@@ -6,14 +6,15 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-
 from google import genai
 from google.genai import types
+from backend.config import configure_logging
+from backend.config import Settings, settings
+from backend.gemini import GeminiService
+from backend.neo4j import Neo4jQuoteRepository
 
-from backend.app.core.logging import configure_logging
-from backend.app.core.settings import Settings, settings
-from backend.app.integrations.gemini import GeminiService
-from backend.app.integrations.neo4j_repository import Neo4jQuoteRepository
+
+# Maintenance
 
 logger = logging.getLogger(__name__)
 
