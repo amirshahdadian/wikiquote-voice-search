@@ -83,6 +83,9 @@ frontend/*.tsbuildinfo
 # Neo4j
 neo4j/
 
+# Local Git worktrees
+.worktrees/
+
 # Generated API audio
 data/api_audio/
 
