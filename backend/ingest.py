@@ -34,6 +34,8 @@ QUOTE_TEMPLATES = {
 }
 EXCLUDED_SECTIONS = {
     "bibliography",
+    "cast",
+    "characters",
     "external links",
     "further reading",
     "misattributed",

@@ -53,7 +53,10 @@ The extractor trusts page structure:
 - explicit links for authors and works;
 - section headings for sourced, attributed, disputed, and about status.
 
-It excludes non-content namespaces, redirects, and reference sections. It
+It excludes non-content namespaces, redirects, reference sections, and the cast
+and character lists of film and play pages, whose bullets otherwise parse as
+quotations: 37,169 rows of the form "Actor - Character" were removed from an
+earlier import. It
 checks quote length, word count, and alphabetic character ratio. It does not
 guess whether arbitrary introductory prose names a person, infer authors from
 geography, or maintain an English-language blacklist of sentence patterns.
@@ -110,7 +113,7 @@ It reports current node counts.
 
 ## 4. The request rewrite
 
-An earlier version of this project planned to embed all 522,590 quotations and
+An earlier version of this project planned to embed all of the quotations and
 fuse vector results with full-text results. That backfill was never run, so the
 vector path never executed, and the words a person says when asking for a quote
 were sent to the full-text index unchanged. Every term was required, which made
@@ -157,7 +160,7 @@ Each result follows a `Quote` to one `Attribution`. Nullable author and work
 fields remain null instead of creating fake "Unknown" graph entities.
 
 Choosing that one attribution is the only part of retrieval that is not a
-straight lookup, because 28,557 quotations carry more than one claim. The
+straight lookup, because 27,884 quotations carry more than one claim. The
 preference order is stored: ingestion writes `Attribution.status_rank`, 0 for
 sourced through 3 for anything else, so every query orders by one integer
 property instead of evaluating a four-branch `CASE` at read time. The ranking
@@ -283,9 +286,9 @@ state, and HTTP mapping each have focused tests.
 
 ## 12. Cutover procedure
 
-The current Neo4j Desktop graph contains 522,590 quotes, 556,853 attributions,
-and 47,062 authors. It has 953,857 relationships: 556,853
-`HAS_ATTRIBUTION` edges and 397,004 `ATTRIBUTED_TO` edges. Every attribution
+The current Neo4j Desktop graph contains 485,421 quotes, 518,770 attributions,
+and 47,062 authors. It has 915,768 relationships: 518,770
+`HAS_ATTRIBUTION` edges and 396,998 `ATTRIBUTED_TO` edges. Every attribution
 has a page title, all indexes are online, and integrity checks report no blank
 or orphan nodes. A stopped Docker volume preserves the pre-cutover graph.
 

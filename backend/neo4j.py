@@ -69,7 +69,8 @@ _ATTRIBUTION_SUBQUERY = """
 CALL (q) {
   MATCH (q)-[:HAS_ATTRIBUTION]->(attribution:Attribution)
   OPTIONAL MATCH (attribution)-[:ATTRIBUTED_TO]->(author:Author)
-  RETURN author.name AS author_name,
+  OPTIONAL MATCH (page_author:Author {key: toLower(trim(attribution.page_title))})
+  RETURN coalesce(author.name, page_author.name) AS author_name,
          attribution.work_title AS work_title,
          attribution.citation AS citation,
          attribution.page_title AS page_title
@@ -116,6 +117,19 @@ ORDER BY score DESC
 LIMIT $limit
 """
 )
+
+_RANDOM_QUERY = """
+MATCH (q:Quote)-[:HAS_ATTRIBUTION]->(attribution:Attribution)-[:ATTRIBUTED_TO]->(author:Author)
+WHERE NOT q.text =~ '.*[\\p{IsHebrew}\\p{IsArabic}\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsCyrillic}\\p{IsGreek}\\p{IsDevanagari}].*'
+WITH q, attribution, author, rand() AS random
+ORDER BY random, attribution.status_rank
+LIMIT 1
+RETURN q.id AS quote_id, q.text AS quote_text, author.name AS author_name,
+       attribution.work_title AS work_title,
+       attribution.citation AS citation,
+       attribution.page_title AS page_title,
+       1.0 AS score
+"""
 
 _FRAGMENT_QUERY = (
     """
@@ -288,15 +302,8 @@ class Neo4jQuoteRepository:
         )
 
     def random_quote(self) -> QuoteHit | None:
-        query = (
-            "MATCH (q:Quote) WITH q, rand() AS random ORDER BY random LIMIT 1\n"
-            + _ATTRIBUTION_SUBQUERY
-            + """
-RETURN q.id AS quote_id, q.text AS quote_text, author_name, work_title,
-       citation, page_title, 1.0 AS score
-"""
-        )
-        hits = self._query_hits(query, search_type="random")
+        """Pick an attributed quotation the synthesizer can actually read aloud."""
+        hits = self._query_hits(_RANDOM_QUERY, search_type="random")
         return hits[0] if hits else None
 
     def _query_hits(
